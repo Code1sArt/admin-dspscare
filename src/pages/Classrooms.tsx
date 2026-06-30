@@ -1,5 +1,8 @@
 import { useState, useEffect } from 'react';
-import { Search, Plus, Edit, Trash2, X, Users, Award, Shield, AlertTriangle, BookOpen, Save } from 'lucide-react';
+import {
+    Search, Plus, Edit, Trash2, X, Users, Award, Shield,
+    AlertTriangle, BookOpen, Save, ChevronLeft, ChevronRight
+} from 'lucide-react';
 import toast from 'react-hot-toast';
 import Swal from 'sweetalert2';
 import api from '../services/api';
@@ -41,6 +44,8 @@ const DEFAULT_FORM = {
     termId: '' as number | '',
 };
 
+const ITEMS_PER_PAGE = 10;
+
 export default function Classrooms() {
     const [classrooms, setClassrooms] = useState<Classroom[]>([]);
     const [terms, setTerms] = useState<Term[]>([]);
@@ -49,6 +54,7 @@ export default function Classrooms() {
 
     const [searchQuery, setSearchQuery] = useState('');
     const [filterTermId, setFilterTermId] = useState<string>('ALL');
+    const [currentPage, setCurrentPage] = useState(1);
 
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [modalMode, setModalMode] = useState<'CREATE' | 'EDIT'>('CREATE');
@@ -187,6 +193,10 @@ export default function Classrooms() {
         const matchTerm = filterTermId === 'ALL' || room.termId.toString() === filterTermId;
         return matchSearch && matchTerm;
     });
+    const totalPages = Math.max(1, Math.ceil(filteredClassrooms.length / ITEMS_PER_PAGE));
+    const activePage = Math.min(currentPage, totalPages);
+    const pageStart = (activePage - 1) * ITEMS_PER_PAGE;
+    const paginatedClassrooms = filteredClassrooms.slice(pageStart, pageStart + ITEMS_PER_PAGE);
 
     // ตัวกรองสำหรับรายชื่อครูใน Modal แบบ Real-time
     const filteredTeachers = teachers.filter(teacher =>
@@ -220,14 +230,20 @@ export default function Classrooms() {
                         placeholder="ค้นหาชื่อห้องเรียน (เช่น ม.6/5)..."
                         className="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:ring-primary focus:border-primary outline-none"
                         value={searchQuery}
-                        onChange={(e) => setSearchQuery(e.target.value)}
+                        onChange={(e) => {
+                            setSearchQuery(e.target.value);
+                            setCurrentPage(1);
+                        }}
                     />
                 </div>
                 <div className="flex items-center gap-2 border border-gray-300 rounded-lg px-3 py-2 bg-white">
                     <BookOpen className="text-gray-400" size={20} />
                     <select
                         value={filterTermId}
-                        onChange={(e) => setFilterTermId(e.target.value)}
+                        onChange={(e) => {
+                            setFilterTermId(e.target.value);
+                            setCurrentPage(1);
+                        }}
                         className="bg-transparent focus:outline-none text-gray-700 outline-none border-none"
                     >
                         <option value="ALL">ดูทุกภาคเรียน</option>
@@ -260,7 +276,7 @@ export default function Classrooms() {
                             ) : filteredClassrooms.length === 0 ? (
                                 <tr><td colSpan={6} className="p-8 text-center text-gray-500">ไม่พบข้อมูลห้องเรียน</td></tr>
                             ) : (
-                                filteredClassrooms.map((room) => (
+                                paginatedClassrooms.map((room) => (
                                     <tr key={room.id} className="hover:bg-gray-50 transition-colors">
                                         <td className="p-4 font-bold text-gray-800 text-lg">{room.name}</td>
                                         <td className="p-4 text-gray-600">
@@ -307,6 +323,37 @@ export default function Classrooms() {
                         </tbody>
                     </table>
                 </div>
+
+                {filteredClassrooms.length > 0 && (
+                    <div className="flex flex-col gap-3 border-t border-gray-100 bg-gray-50/50 p-4 sm:flex-row sm:items-center sm:justify-between">
+                        <p className="text-sm text-gray-500">
+                            แสดง {pageStart + 1}-{Math.min(pageStart + ITEMS_PER_PAGE, filteredClassrooms.length)} จาก {filteredClassrooms.length} ห้อง
+                        </p>
+                        <div className="flex items-center gap-2">
+                            <button
+                                type="button"
+                                disabled={activePage === 1}
+                                onClick={() => setCurrentPage(activePage - 1)}
+                                className="rounded-lg border border-gray-300 bg-white p-1.5 text-gray-600 transition-colors hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-30"
+                                aria-label="หน้าก่อนหน้า"
+                            >
+                                <ChevronLeft size={20} />
+                            </button>
+                            <span className="rounded-lg bg-primary/10 px-3 py-1 text-sm font-bold text-primary">
+                                หน้า {activePage} / {totalPages}
+                            </span>
+                            <button
+                                type="button"
+                                disabled={activePage === totalPages}
+                                onClick={() => setCurrentPage(activePage + 1)}
+                                className="rounded-lg border border-gray-300 bg-white p-1.5 text-gray-600 transition-colors hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-30"
+                                aria-label="หน้าถัดไป"
+                            >
+                                <ChevronRight size={20} />
+                            </button>
+                        </div>
+                    </div>
+                )}
             </div>
 
             {/* Modal เพิ่ม/แก้ไข ห้องเรียน */}
