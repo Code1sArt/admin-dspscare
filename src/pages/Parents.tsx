@@ -35,11 +35,16 @@ interface Student {
 }
 
 const ITEMS_PER_PAGE = 10;
+const STUDENT_SEARCH_LIMIT = 30;
+const STUDENT_SEARCH_MIN_LENGTH = 2;
+const STUDENT_SEARCH_DEBOUNCE_MS = 300;
 
 export default function AdminParentManagement() {
     const [parents, setParents] = useState<Parent[]>([]);
     const [students, setStudents] = useState<Student[]>([]);
     const [loading, setLoading] = useState(false);
+    const [studentSearchLoading, setStudentSearchLoading] = useState(false);
+    const [studentSearchError, setStudentSearchError] = useState(false);
 
     // Search & Pagination
     const [searchQuery, setSearchQuery] = useState('');
@@ -64,7 +69,6 @@ export default function AdminParentManagement() {
 
     useEffect(() => {
         fetchParents();
-        fetchStudents();
     }, []);
 
     const fetchParents = async () => {
@@ -79,21 +83,49 @@ export default function AdminParentManagement() {
         }
     };
 
-    const fetchStudents = async () => {
-        try {
-            const res = await api.get('/students');
-            setStudents(res.data);
-        } catch (error) {
-            toast.error('โหลดรายชื่อนักเรียนไม่สำเร็จ');
-        }
-    };
+    // ค้นหาจาก API เพื่อไม่ต้องโหลดและ render นักเรียนทั้งหมดพร้อมกัน
+    useEffect(() => {
+        const query = studentQuery.trim();
+        const isStudentModalOpen = isRegisterModalOpen || isAddChildModalOpen;
 
-    // --- Logic การกรองนักเรียนใน Combobox ---
-    const filteredStudents = studentQuery === ''
-        ? students
-        : students.filter((s) =>
-            `${s.firstName} ${s.lastName} ${s.citizenId}`.toLowerCase().includes(studentQuery.toLowerCase())
-        );
+        if (!isStudentModalOpen || query.length < STUDENT_SEARCH_MIN_LENGTH) return;
+
+        const controller = new AbortController();
+        const timeoutId = window.setTimeout(async () => {
+            setStudentSearchLoading(true);
+            setStudentSearchError(false);
+
+            try {
+                const res = await api.get('/students/search', {
+                    params: { q: query, limit: STUDENT_SEARCH_LIMIT },
+                    signal: controller.signal
+                });
+                const results = Array.isArray(res.data) ? res.data : res.data?.data;
+                setStudents(Array.isArray(results) ? results.slice(0, STUDENT_SEARCH_LIMIT) : []);
+            } catch {
+                if (!controller.signal.aborted) {
+                    setStudents([]);
+                    setStudentSearchError(true);
+                }
+            } finally {
+                if (!controller.signal.aborted) {
+                    setStudentSearchLoading(false);
+                }
+            }
+        }, STUDENT_SEARCH_DEBOUNCE_MS);
+
+        return () => {
+            window.clearTimeout(timeoutId);
+            controller.abort();
+        };
+    }, [studentQuery, isRegisterModalOpen, isAddChildModalOpen]);
+
+    const handleStudentQueryChange = (value: string) => {
+        setStudentQuery(value);
+        setStudents([]);
+        setStudentSearchError(false);
+        setStudentSearchLoading(value.trim().length >= STUDENT_SEARCH_MIN_LENGTH);
+    };
 
     // --- Logic การค้นหาผู้ปกครองและแบ่งหน้า ---
     const filteredParents = useMemo(() => {
@@ -173,6 +205,9 @@ export default function AdminParentManagement() {
         setRegisterForm({ citizenId: '', firstName: '', lastName: '', password: '', lineUserId: '' });
         setSelectedStudent(null);
         setStudentQuery('');
+        setStudents([]);
+        setStudentSearchLoading(false);
+        setStudentSearchError(false);
         setActiveParentId('');
     };
 
@@ -326,7 +361,7 @@ export default function AdminParentManagement() {
                                                         required
                                                         className="w-full border-none py-2 pl-3 pr-10 text-sm leading-5 text-gray-900 focus:ring-0 outline-none"
                                                         displayValue={(student: Student) => student ? `${student.firstName} ${student.lastName}` : ''}
-                                                        onChange={(event) => setStudentQuery(event.target.value)}
+                                                        onChange={(event) => handleStudentQueryChange(event.target.value)}
                                                         placeholder="พิมพ์ชื่อเพื่อค้นหา..."
                                                     />
                                                     <Combobox.Button className="absolute inset-y-0 right-0 flex items-center pr-2">
@@ -335,10 +370,16 @@ export default function AdminParentManagement() {
                                                 </div>
                                                 <Transition as={Fragment} leave="transition ease-in duration-100" leaveFrom="opacity-100" leaveTo="opacity-0" afterLeave={() => setStudentQuery('')}>
                                                     <Combobox.Options className="absolute mt-1 max-h-40 w-full overflow-auto rounded-md bg-white py-1 text-base shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none sm:text-sm">
-                                                        {filteredStudents.length === 0 ? (
-                                                            <div className="relative cursor-default select-none py-2 px-4 text-gray-700">ไม่พบข้อมูลนักเรียน</div>
+                                                        {studentQuery.trim().length < STUDENT_SEARCH_MIN_LENGTH ? (
+                                                            <div className="relative cursor-default select-none px-4 py-2 text-gray-500">พิมพ์อย่างน้อย 2 ตัวอักษรเพื่อค้นหา</div>
+                                                        ) : studentSearchLoading ? (
+                                                            <div className="relative cursor-default select-none px-4 py-2 text-gray-500">กำลังค้นหา...</div>
+                                                        ) : studentSearchError ? (
+                                                            <div className="relative cursor-default select-none px-4 py-2 text-red-600">ค้นหาไม่สำเร็จ กรุณาลองอีกครั้ง</div>
+                                                        ) : students.length === 0 ? (
+                                                            <div className="relative cursor-default select-none px-4 py-2 text-gray-700">ไม่พบข้อมูลนักเรียน</div>
                                                         ) : (
-                                                            filteredStudents.map((student) => (
+                                                            students.map((student) => (
                                                                 <Combobox.Option key={student.id} className={({ active }) => `relative cursor-default select-none py-2 pl-10 pr-4 ${active ? 'bg-primary text-white' : 'text-gray-900'}`} value={student}>
                                                                     {({ selected, active }) => (
                                                                         <>
@@ -389,7 +430,7 @@ export default function AdminParentManagement() {
                                                         required
                                                         className="w-full border-none py-2 pl-3 pr-10 text-sm leading-5 text-gray-900 focus:ring-0 outline-none"
                                                         displayValue={(student: Student) => student ? `${student.firstName} ${student.lastName}` : ''}
-                                                        onChange={(event) => setStudentQuery(event.target.value)}
+                                                        onChange={(event) => handleStudentQueryChange(event.target.value)}
                                                         placeholder="พิมพ์ชื่อหรือรหัสเพื่อค้นหา..."
                                                     />
                                                     <Combobox.Button className="absolute inset-y-0 right-0 flex items-center pr-2">
@@ -398,10 +439,16 @@ export default function AdminParentManagement() {
                                                 </div>
                                                 <Transition as={Fragment} leave="transition ease-in duration-100" leaveFrom="opacity-100" leaveTo="opacity-0" afterLeave={() => setStudentQuery('')}>
                                                     <Combobox.Options className="absolute mt-1 max-h-40 w-full overflow-auto rounded-md bg-white py-1 text-base shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none sm:text-sm">
-                                                        {filteredStudents.length === 0 ? (
-                                                            <div className="relative cursor-default select-none py-2 px-4 text-gray-700">ไม่พบข้อมูลนักเรียน</div>
+                                                        {studentQuery.trim().length < STUDENT_SEARCH_MIN_LENGTH ? (
+                                                            <div className="relative cursor-default select-none px-4 py-2 text-gray-500">พิมพ์อย่างน้อย 2 ตัวอักษรเพื่อค้นหา</div>
+                                                        ) : studentSearchLoading ? (
+                                                            <div className="relative cursor-default select-none px-4 py-2 text-gray-500">กำลังค้นหา...</div>
+                                                        ) : studentSearchError ? (
+                                                            <div className="relative cursor-default select-none px-4 py-2 text-red-600">ค้นหาไม่สำเร็จ กรุณาลองอีกครั้ง</div>
+                                                        ) : students.length === 0 ? (
+                                                            <div className="relative cursor-default select-none px-4 py-2 text-gray-700">ไม่พบข้อมูลนักเรียน</div>
                                                         ) : (
-                                                            filteredStudents.map((student) => (
+                                                            students.map((student) => (
                                                                 <Combobox.Option key={student.id} className={({ active }) => `relative cursor-default select-none py-2 pl-10 pr-4 ${active ? 'bg-primary text-white' : 'text-gray-900'}`} value={student}>
                                                                     {({ selected, active }) => (
                                                                         <>
