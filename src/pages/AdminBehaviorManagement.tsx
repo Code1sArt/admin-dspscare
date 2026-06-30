@@ -62,6 +62,9 @@ interface PointCategory {
 }
 
 const ITEMS_PER_PAGE = 10;
+const STUDENT_SEARCH_LIMIT = 30;
+const STUDENT_SEARCH_MIN_LENGTH = 2;
+const STUDENT_SEARCH_DEBOUNCE_MS = 300;
 
 const formatDateTime = (date: string) =>
     new Date(date).toLocaleString('th-TH', {
@@ -81,6 +84,8 @@ export default function AdminBehaviorManagement() {
     const [classrooms, setClassrooms] = useState<Classroom[]>([]);
     const [students, setStudents] = useState<Student[]>([]);
     const [categories, setCategories] = useState<PointCategory[]>([]);
+    const [studentSearchLoading, setStudentSearchLoading] = useState(false);
+    const [studentSearchError, setStudentSearchError] = useState(false);
 
     // --- Filters State ---
     const [selectedTermId, setSelectedTermId] = useState<string>('');
@@ -95,16 +100,14 @@ export default function AdminBehaviorManagement() {
         // 1. โหลดข้อมูลพื้นฐาน
         const fetchBaseData = async () => {
             try {
-                const [termsRes, classroomsRes, studentsRes, categoriesRes] = await Promise.all([
+                const [termsRes, classroomsRes, categoriesRes] = await Promise.all([
                     api.get('/terms'),
                     api.get('/classrooms'),
-                    api.get('/students'),
                     api.get('/point-categories')
                 ]);
 
                 setTerms(termsRes.data);
                 setClassrooms(classroomsRes.data);
-                setStudents(studentsRes.data);
                 setCategories(categoriesRes.data);
 
                 // เลือกเทอมปัจจุบันเป็น Default
@@ -117,6 +120,55 @@ export default function AdminBehaviorManagement() {
         };
         fetchBaseData();
     }, []);
+
+    useEffect(() => {
+        const query = studentQuery.trim();
+        if (query.length < STUDENT_SEARCH_MIN_LENGTH) return;
+
+        const controller = new AbortController();
+        const timeoutId = window.setTimeout(async () => {
+            setStudentSearchLoading(true);
+            setStudentSearchError(false);
+
+            try {
+                const res = await api.get('/students/search', {
+                    params: { q: query, limit: STUDENT_SEARCH_LIMIT },
+                    signal: controller.signal
+                });
+                const results = Array.isArray(res.data) ? res.data : res.data?.data;
+                setStudents(Array.isArray(results) ? results.slice(0, STUDENT_SEARCH_LIMIT) : []);
+            } catch {
+                if (!controller.signal.aborted) {
+                    setStudents([]);
+                    setStudentSearchError(true);
+                }
+            } finally {
+                if (!controller.signal.aborted) {
+                    setStudentSearchLoading(false);
+                }
+            }
+        }, STUDENT_SEARCH_DEBOUNCE_MS);
+
+        return () => {
+            window.clearTimeout(timeoutId);
+            controller.abort();
+        };
+    }, [studentQuery]);
+
+    const handleStudentQueryChange = (value: string) => {
+        setStudentQuery(value);
+        setStudents([]);
+        setStudentSearchError(false);
+        setStudentSearchLoading(value.trim().length >= STUDENT_SEARCH_MIN_LENGTH);
+    };
+
+    const handleSelectStudent = (student: Student | null) => {
+        setSelectedStudent(student);
+        setStudentQuery('');
+        setStudents([]);
+        setStudentSearchLoading(false);
+        setStudentSearchError(false);
+    };
 
     // 2. ดึงประวัติเมื่อ Filters เปลี่ยน (รวมถึง TermId)
     useEffect(() => {
@@ -147,12 +199,6 @@ export default function AdminBehaviorManagement() {
             setLoading(false);
         }
     };
-
-    const filteredStudents = studentQuery === ''
-        ? students
-        : students.filter((s) =>
-            `${s.firstName} ${s.lastName} ${s.citizenId}`.toLowerCase().includes(studentQuery.toLowerCase())
-        );
 
     // --- Actions ---
     const handleImportExcel = async () => {
@@ -482,29 +528,35 @@ export default function AdminBehaviorManagement() {
                     {/* ค้นหานักเรียน */}
                     <div className="space-y-1">
                         <label className="text-xs font-bold text-gray-400 ml-1 uppercase">ค้นหานักเรียน</label>
-                        <Combobox value={selectedStudent} onChange={setSelectedStudent}>
+                        <Combobox value={selectedStudent} onChange={handleSelectStudent}>
                             <div className="relative">
                                 <div className="relative w-full cursor-default overflow-hidden rounded-xl border border-gray-200 bg-white text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/20">
                                     <Combobox.Input
                                         className="w-full border-none py-2 pl-3 pr-10 text-sm leading-5 text-gray-900 focus:ring-0 outline-none"
                                         displayValue={(student: Student) => student ? `${student.firstName} ${student.lastName}` : ''}
-                                        onChange={(event) => setStudentQuery(event.target.value)}
+                                        onChange={(event) => handleStudentQueryChange(event.target.value)}
                                         placeholder="พิมพ์ชื่อเพื่อค้นหา..."
                                     />
                                     <Combobox.Button className="absolute inset-y-0 right-0 flex items-center pr-2">
                                         <ChevronsUpDown className="h-5 w-5 text-gray-400" aria-hidden="true" />
                                     </Combobox.Button>
                                     {selectedStudent && (
-                                        <button onClick={() => setSelectedStudent(null)} className="absolute inset-y-0 right-7 flex items-center">
+                                        <button type="button" onClick={() => handleSelectStudent(null)} className="absolute inset-y-0 right-7 flex items-center">
                                             <X className="h-4 w-4 text-gray-400 hover:text-red-500" />
                                         </button>
                                     )}
                                 </div>
                                 <Combobox.Options className="absolute z-50 mt-1 max-h-60 w-full overflow-auto rounded-md bg-white py-1 text-base shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none sm:text-sm">
-                                    {filteredStudents.length === 0 && studentQuery !== '' ? (
-                                        <div className="relative cursor-default select-none py-2 px-4 text-gray-700">ไม่พบข้อมูล</div>
+                                    {studentQuery.trim().length < STUDENT_SEARCH_MIN_LENGTH ? (
+                                        <div className="relative cursor-default select-none px-4 py-2 text-gray-500">พิมพ์อย่างน้อย 2 ตัวอักษรเพื่อค้นหา</div>
+                                    ) : studentSearchLoading ? (
+                                        <div className="relative cursor-default select-none px-4 py-2 text-gray-500">กำลังค้นหา...</div>
+                                    ) : studentSearchError ? (
+                                        <div className="relative cursor-default select-none px-4 py-2 text-red-600">ค้นหาไม่สำเร็จ กรุณาลองอีกครั้ง</div>
+                                    ) : students.length === 0 ? (
+                                        <div className="relative cursor-default select-none px-4 py-2 text-gray-700">ไม่พบข้อมูลนักเรียน</div>
                                     ) : (
-                                        filteredStudents.map((student) => (
+                                        students.map((student) => (
                                             <Combobox.Option
                                                 key={student.id}
                                                 className={({ active }) => `relative cursor-default select-none py-2 pl-10 pr-4 ${active ? 'bg-primary text-white' : 'text-gray-900'}`}
