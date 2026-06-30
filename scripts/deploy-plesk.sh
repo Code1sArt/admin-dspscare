@@ -27,6 +27,9 @@ rsync \
   --archive \
   --compress \
   --delete \
+  --exclude='.php-ini' \
+  --exclude='.php-version' \
+  --exclude='.well-known/' \
   --human-readable \
   --itemize-changes \
   -e "ssh -p ${PLESK_PORT} -o BatchMode=yes" \

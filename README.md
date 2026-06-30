@@ -100,4 +100,4 @@ git push -u origin main
 
 ติดตามผลได้ที่แท็บ **Actions** ใน GitHub หรือกด **Run workflow** เพื่อ deploy ด้วยตนเอง
 
-> `rsync --delete` จะลบไฟล์เก่าภายใน `PLESK_TARGET_PATH` ให้ path นี้ชี้เฉพาะ document root ของ frontend เท่านั้น ห้ามชี้ไปยังโฟลเดอร์ที่มีไฟล์ backend หรือข้อมูลอื่นร่วมอยู่ด้วย
+> `rsync --delete` จะลบไฟล์ frontend เก่าภายใน `PLESK_TARGET_PATH` โดยยกเว้นไฟล์ระบบ `.php-ini`, `.php-version` และ `.well-known/` ให้ path นี้ชี้เฉพาะ document root ของ frontend เท่านั้น ห้ามชี้ไปยังโฟลเดอร์ที่มี backend หรือข้อมูลอื่นร่วมอยู่ด้วย
