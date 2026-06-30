@@ -1,0 +1,64 @@
+name: Build and deploy to Plesk
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: plesk-production
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: yarn
+
+      - name: Install dependencies
+        run: yarn install --frozen-lockfile
+
+      - name: Lint
+        # โปรเจกต์ยังมี lint debt เดิม จึงรายงานผลแต่ยังไม่ block production deploy
+        # เอา continue-on-error ออกเมื่อแก้ lint ครบแล้ว
+        continue-on-error: true
+        run: yarn lint
+
+      - name: Build production bundle
+        env:
+          VITE_API_URL: ${{ secrets.VITE_API_URL }}
+          VITE_LINE_CALLBACK_URL: ${{ secrets.VITE_LINE_CALLBACK_URL }}
+        run: yarn build
+
+      - name: Configure SSH
+        env:
+          PLESK_SSH_KEY: ${{ secrets.PLESK_SSH_KEY }}
+          PLESK_KNOWN_HOSTS: ${{ secrets.PLESK_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d "$HOME/.ssh"
+          printf '%s\n' "$PLESK_SSH_KEY" > "$HOME/.ssh/id_ed25519"
+          chmod 600 "$HOME/.ssh/id_ed25519"
+          printf '%s\n' "$PLESK_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+
+      - name: Deploy dist to Plesk
+        env:
+          PLESK_HOST: ${{ secrets.PLESK_HOST }}
+          PLESK_PORT: ${{ secrets.PLESK_PORT }}
+          PLESK_USER: ${{ secrets.PLESK_USER }}
+          PLESK_TARGET_PATH: ${{ secrets.PLESK_TARGET_PATH }}
+        run: bash scripts/deploy-plesk.sh
