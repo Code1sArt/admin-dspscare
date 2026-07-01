@@ -15,6 +15,7 @@ import AdminBehaviorManagement from './pages/AdminBehaviorManagement';
 import AttendanceMonitoring from './pages/AttendanceMonitoring';
 import SchoolSummary from './pages/SchoolSummary';
 import AcademicCalendar from './pages/AcademicCalendar';
+import Promotions from './pages/Promotions';
 
 // คอมโพเนนต์สำหรับตรวจบัตรผ่าน (Protected Route)
 const ProtectedRoute = ({ children }: { children: JSX.Element }) => {
@@ -70,6 +71,7 @@ function App() {
           <Route path="attendance-monitoring" element={<AttendanceMonitoring />} />
           <Route path="school-summary" element={<SchoolSummary />} />
           <Route path="academic-calendar" element={<AcademicCalendar />} />
+          <Route path="promotions" element={<Promotions />} />
         </Route>
       </Routes>
     </BrowserRouter>

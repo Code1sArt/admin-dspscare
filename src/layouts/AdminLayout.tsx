@@ -45,7 +45,8 @@ const menuSections: MenuSection[] = [
             { name: 'จัดการนักเรียน', path: '/students', icon: Users },
             { name: 'จัดการบุคลากร', path: '/teachers', icon: UserCheck },
             { name: 'จัดการผู้ปกครอง', path: '/parents', icon: UserPlus },
-            { name: 'จัดการห้องเรียน', path: '/classrooms', icon: DoorOpen }
+            { name: 'จัดการห้องเรียน', path: '/classrooms', icon: DoorOpen },
+            { name: 'เลื่อนชั้น / เปลี่ยนเทอม', path: '/promotions', icon: GraduationCap }
         ]
     },
     {
