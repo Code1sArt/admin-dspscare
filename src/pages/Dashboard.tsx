@@ -308,7 +308,7 @@ export default function Dashboard() {
         return (
             <div className="flex min-h-[60vh] items-center justify-center text-gray-500">
                 <LoaderCircle className="mr-3 animate-spin text-primary" size={26} />
-                กำลังโหลดข้อมูล "เทพศิรินทร์พุแค ที่แห่งนี้ดูแลแบบครอบครัว"
+                กำลังโหลดข้อมูล "เทพศิรินทร์พุแค ที่แห่งนี้ดูแลเหมือนครอบครัว"
             </div>
         );
     }
