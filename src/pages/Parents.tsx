@@ -217,7 +217,7 @@ export default function AdminParentManagement() {
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div>
                     <h1 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
-                        <Users className="text-primary" /> จัดการข้อมูลผู้ปกครอง
+                        <Users className="text-primary" /> จัดการผู้ปกครอง
                     </h1>
                     <p className="text-gray-500 text-sm">ดูรายชื่อผู้ปกครอง เพิ่มนักเรียนในความดูแล และลบบัญชี</p>
                 </div>
