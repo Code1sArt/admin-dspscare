@@ -4,10 +4,13 @@ on:
   push:
     branches:
       - main
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
 
 concurrency:
-  group: plesk-production
+  group: plesk-production-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -33,8 +36,6 @@ jobs:
         run: yarn install --frozen-lockfile
 
       - name: Lint
-        # โปรเจกต์ยังมี lint debt เดิม จึงรายงานผลแต่ยังไม่ block production deploy
-        # เอา continue-on-error ออกเมื่อแก้ lint ครบแล้ว
         continue-on-error: true
         run: yarn lint
 
@@ -45,6 +46,7 @@ jobs:
         run: yarn build
 
       - name: Configure SSH
+        if: github.event_name == 'push'
         env:
           PLESK_SSH_KEY: ${{ secrets.PLESK_SSH_KEY }}
           PLESK_KNOWN_HOSTS: ${{ secrets.PLESK_KNOWN_HOSTS }}
@@ -56,6 +58,7 @@ jobs:
           chmod 600 "$HOME/.ssh/known_hosts"
 
       - name: Deploy dist to Plesk
+        if: github.event_name == 'push'
         env:
           PLESK_HOST: ${{ secrets.PLESK_HOST }}
           PLESK_PORT: ${{ secrets.PLESK_PORT }}
