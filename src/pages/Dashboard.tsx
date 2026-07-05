@@ -13,12 +13,16 @@ import {
     LoaderCircle,
     Medal,
     School,
+    Search,
+    Send,
     Shield,
     TrendingUp,
     UserCheck,
     Users,
+    X,
     XCircle
 } from 'lucide-react';
+import { isAxiosError } from 'axios';
 import toast from 'react-hot-toast';
 import api from '../services/api';
 
@@ -45,6 +49,16 @@ interface Teacher {
     lastName: string;
     role: 'ADMIN' | 'TEACHER' | 'AFFAIRS';
     lineUserId: string | null;
+}
+
+type UserRole = 'ADMIN' | 'TEACHER' | 'AFFAIRS' | 'STUDENT' | 'PARENT';
+
+interface LinkedLineUser {
+    id: string;
+    firstName: string;
+    lastName: string;
+    role: UserRole;
+    classroom?: { name: string } | null;
 }
 
 interface SummaryResponse {
@@ -150,6 +164,19 @@ const roleColor: Record<Teacher['role'], string> = {
     AFFAIRS: 'bg-secondary/30 text-[#7a5f00]'
 };
 
+const lineRoleLabel: Record<UserRole, string> = {
+    ADMIN: 'ผู้ดูแลระบบ',
+    TEACHER: 'ครู',
+    AFFAIRS: 'ฝ่ายกิจการ',
+    STUDENT: 'นักเรียน',
+    PARENT: 'ผู้ปกครอง'
+};
+
+const getApiErrorMessage = (error: unknown, fallback: string) => {
+    if (!isAxiosError<{ message?: string }>(error)) return fallback;
+    return error.response?.data?.message || fallback;
+};
+
 export default function Dashboard() {
     const [terms, setTerms] = useState<Term[]>([]);
     const [classrooms, setClassrooms] = useState<Classroom[]>([]);
@@ -160,6 +187,13 @@ export default function Dashboard() {
     const [calendar, setCalendar] = useState<CalendarResponse | null>(null);
     const [loading, setLoading] = useState(true);
     const [loadWarnings, setLoadWarnings] = useState<string[]>([]);
+    const [isLineTestOpen, setIsLineTestOpen] = useState(false);
+    const [linkedLineUsers, setLinkedLineUsers] = useState<LinkedLineUser[]>([]);
+    const [linkedUsersLoading, setLinkedUsersLoading] = useState(false);
+    const [lineUserSearch, setLineUserSearch] = useState('');
+    const [selectedLineUserId, setSelectedLineUserId] = useState('');
+    const [lineTestMessage, setLineTestMessage] = useState('');
+    const [sendingLineTest, setSendingLineTest] = useState(false);
 
     const today = useMemo(() => toIsoDate(new Date()), []);
     const currentMonth = useMemo(() => toMonthParam(new Date()), []);
@@ -220,6 +254,58 @@ export default function Dashboard() {
         completedClassrooms,
         missingReport?.summary.totalClassrooms ?? 0
     );
+
+    const filteredLinkedLineUsers = useMemo(() => {
+        const query = lineUserSearch.trim().toLocaleLowerCase('th');
+        if (!query) return linkedLineUsers;
+
+        return linkedLineUsers.filter(user =>
+            `${user.firstName} ${user.lastName} ${lineRoleLabel[user.role]} ${user.classroom?.name ?? ''}`
+                .toLocaleLowerCase('th')
+                .includes(query)
+        );
+    }, [lineUserSearch, linkedLineUsers]);
+
+    const openLineTestModal = async () => {
+        setIsLineTestOpen(true);
+        setLinkedUsersLoading(true);
+        setLinkedLineUsers([]);
+        setLineUserSearch('');
+        setSelectedLineUserId('');
+        setLineTestMessage('');
+
+        try {
+            const response = await api.get<LinkedLineUser[]>('/line/linked-users');
+            setLinkedLineUsers(response.data);
+        } catch (error) {
+            toast.error(getApiErrorMessage(error, 'โหลดรายชื่อผู้ใช้ที่ผูก LINE ไม่สำเร็จ'));
+        } finally {
+            setLinkedUsersLoading(false);
+        }
+    };
+
+    const handleSendLineTest = async () => {
+        if (!selectedLineUserId) {
+            toast.error('กรุณาเลือกผู้รับการแจ้งเตือน');
+            return;
+        }
+
+        setSendingLineTest(true);
+        const toastId = toast.loading('กำลังส่งข้อความทดสอบ...');
+
+        try {
+            await api.post('/line/test-notification', {
+                userId: selectedLineUserId,
+                ...(lineTestMessage.trim() && { message: lineTestMessage.trim() })
+            });
+            toast.success('ส่งข้อความทดสอบผ่าน LINE สำเร็จ', { id: toastId });
+            setIsLineTestOpen(false);
+        } catch (error) {
+            toast.error(getApiErrorMessage(error, 'ส่งข้อความทดสอบไม่สำเร็จ'), { id: toastId });
+        } finally {
+            setSendingLineTest(false);
+        }
+    };
 
     useEffect(() => {
         const loadDashboard = async () => {
@@ -331,16 +417,26 @@ export default function Dashboard() {
                             </p>
                         </div>
 
-                        <div className="rounded-2xl border border-secondary/25 bg-white/10 p-4 backdrop-blur">
-                            <p className="text-xs font-bold text-yellow-50/70">ภาคเรียนที่ใช้อ้างอิง</p>
-                            <p className="mt-1 text-xl font-black">
-                                {activeTerm ? `ภาคเรียน ${activeTerm.term}/${activeTerm.year}` : 'ยังไม่มีภาคเรียน'}
-                            </p>
-                            <p className="mt-1 text-xs text-yellow-50/70">
-                                {activeTerm?.startDate && activeTerm?.endDate
-                                    ? `${formatThaiDate(activeTerm.startDate)} – ${formatThaiDate(activeTerm.endDate)}`
-                                    : 'ยังไม่ได้กำหนดช่วงเปิด–ปิดภาคเรียน'}
-                            </p>
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-stretch">
+                            <button
+                                type="button"
+                                onClick={() => void openLineTestModal()}
+                                className="inline-flex items-center justify-center gap-2 rounded-2xl bg-[#06C755] px-5 py-4 text-sm font-black text-white shadow-lg shadow-black/10 transition hover:bg-[#05b64e] active:scale-[0.98]"
+                            >
+                                <Send size={18} />
+                                ทดสอบแจ้งเตือน LINE
+                            </button>
+                            <div className="rounded-2xl border border-secondary/25 bg-white/10 p-4 backdrop-blur">
+                                <p className="text-xs font-bold text-yellow-50/70">ภาคเรียนที่ใช้อ้างอิง</p>
+                                <p className="mt-1 text-xl font-black">
+                                    {activeTerm ? `ภาคเรียน ${activeTerm.term}/${activeTerm.year}` : 'ยังไม่มีภาคเรียน'}
+                                </p>
+                                <p className="mt-1 text-xs text-yellow-50/70">
+                                    {activeTerm?.startDate && activeTerm?.endDate
+                                        ? `${formatThaiDate(activeTerm.startDate)} – ${formatThaiDate(activeTerm.endDate)}`
+                                        : 'ยังไม่ได้กำหนดช่วงเปิด–ปิดภาคเรียน'}
+                                </p>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -604,6 +700,154 @@ export default function Dashboard() {
                     </div>
                 </div>
             </section>
+
+            {isLineTestOpen && (
+                <div
+                    className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm"
+                    role="dialog"
+                    aria-modal="true"
+                    aria-labelledby="line-test-title"
+                    onMouseDown={() => !sendingLineTest && setIsLineTestOpen(false)}
+                >
+                    <div
+                        className="w-full max-w-2xl overflow-hidden rounded-3xl bg-white shadow-2xl"
+                        onMouseDown={event => event.stopPropagation()}
+                    >
+                        <div className="flex items-start justify-between border-b border-gray-100 px-6 py-5">
+                            <div>
+                                <h2 id="line-test-title" className="flex items-center gap-2 text-xl font-black text-gray-900">
+                                    <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#06C755]/10 text-[#06C755]">
+                                        <Bell size={21} />
+                                    </span>
+                                    ทดสอบแจ้งเตือน LINE
+                                </h2>
+                                <p className="mt-2 text-sm text-gray-500">
+                                    เลือกผู้ใช้ที่ผูกบัญชี LINE แล้วเพื่อส่งข้อความทดสอบ
+                                </p>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => setIsLineTestOpen(false)}
+                                disabled={sendingLineTest}
+                                className="rounded-xl p-2 text-gray-400 transition hover:bg-gray-100 hover:text-gray-700 disabled:cursor-not-allowed"
+                                aria-label="ปิดหน้าต่าง"
+                            >
+                                <X size={20} />
+                            </button>
+                        </div>
+
+                        <div className="space-y-5 p-6">
+                            <div>
+                                <label htmlFor="line-user-search" className="mb-2 block text-sm font-bold text-gray-700">
+                                    ผู้รับการแจ้งเตือน
+                                </label>
+                                <div className="relative">
+                                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+                                    <input
+                                        id="line-user-search"
+                                        type="search"
+                                        value={lineUserSearch}
+                                        onChange={event => setLineUserSearch(event.target.value)}
+                                        placeholder="ค้นหาชื่อ บทบาท หรือห้องเรียน..."
+                                        className="w-full rounded-xl border border-gray-200 py-2.5 pl-10 pr-4 text-sm outline-none transition focus:border-primary focus:ring-4 focus:ring-primary/10"
+                                    />
+                                </div>
+
+                                <div className="mt-3 max-h-64 overflow-y-auto rounded-2xl border border-gray-200">
+                                    {linkedUsersLoading ? (
+                                        <div className="flex items-center justify-center gap-2 p-8 text-sm text-gray-500">
+                                            <LoaderCircle className="animate-spin text-primary" size={20} />
+                                            กำลังโหลดรายชื่อ...
+                                        </div>
+                                    ) : filteredLinkedLineUsers.length === 0 ? (
+                                        <div className="p-8 text-center text-sm text-gray-500">
+                                            {linkedLineUsers.length === 0
+                                                ? 'ยังไม่มีผู้ใช้ที่ผูกบัญชี LINE'
+                                                : 'ไม่พบผู้ใช้จากคำค้นหา'}
+                                        </div>
+                                    ) : (
+                                        <div className="divide-y divide-gray-100">
+                                            {filteredLinkedLineUsers.map(user => {
+                                                const isSelected = selectedLineUserId === user.id;
+                                                return (
+                                                    <label
+                                                        key={user.id}
+                                                        className={`flex cursor-pointer items-center gap-3 p-4 transition ${
+                                                            isSelected ? 'bg-[#06C755]/10' : 'hover:bg-gray-50'
+                                                        }`}
+                                                    >
+                                                        <input
+                                                            type="radio"
+                                                            name="line-recipient"
+                                                            value={user.id}
+                                                            checked={isSelected}
+                                                            onChange={() => setSelectedLineUserId(user.id)}
+                                                            className="h-4 w-4 accent-[#06C755]"
+                                                        />
+                                                        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary/10 font-black text-primary">
+                                                            {user.firstName.charAt(0)}
+                                                        </span>
+                                                        <span className="min-w-0 flex-1">
+                                                            <span className="block truncate text-sm font-bold text-gray-900">
+                                                                {user.firstName} {user.lastName}
+                                                            </span>
+                                                            <span className="mt-0.5 block text-xs text-gray-500">
+                                                                {lineRoleLabel[user.role]}
+                                                                {user.classroom?.name ? ` · ${user.classroom.name}` : ''}
+                                                            </span>
+                                                        </span>
+                                                        <span className="rounded-full bg-[#06C755]/10 px-2.5 py-1 text-[11px] font-bold text-[#079b45]">
+                                                            ผูก LINE แล้ว
+                                                        </span>
+                                                    </label>
+                                                );
+                                            })}
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+
+                            <div>
+                                <label htmlFor="line-test-message" className="mb-2 block text-sm font-bold text-gray-700">
+                                    ข้อความทดสอบ <span className="font-normal text-gray-400">(ไม่บังคับ)</span>
+                                </label>
+                                <textarea
+                                    id="line-test-message"
+                                    value={lineTestMessage}
+                                    onChange={event => setLineTestMessage(event.target.value)}
+                                    maxLength={500}
+                                    rows={3}
+                                    placeholder="เว้นว่างเพื่อใช้ข้อความทดสอบมาตรฐานของระบบ"
+                                    className="w-full resize-none rounded-xl border border-gray-200 px-4 py-3 text-sm outline-none transition focus:border-primary focus:ring-4 focus:ring-primary/10"
+                                />
+                                <p className="mt-1 text-right text-xs text-gray-400">{lineTestMessage.length}/500</p>
+                            </div>
+                        </div>
+
+                        <div className="flex justify-end gap-3 border-t border-gray-100 bg-gray-50 px-6 py-4">
+                            <button
+                                type="button"
+                                onClick={() => setIsLineTestOpen(false)}
+                                disabled={sendingLineTest}
+                                className="rounded-xl border border-gray-200 bg-white px-5 py-2.5 text-sm font-bold text-gray-600 transition hover:bg-gray-100 disabled:opacity-60"
+                            >
+                                ยกเลิก
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => void handleSendLineTest()}
+                                disabled={!selectedLineUserId || linkedUsersLoading || sendingLineTest}
+                                className="inline-flex items-center gap-2 rounded-xl bg-[#06C755] px-5 py-2.5 text-sm font-black text-white transition hover:bg-[#05b64e] disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                                {sendingLineTest
+                                    ? <LoaderCircle className="animate-spin" size={18} />
+                                    : <Send size={18} />}
+                                {sendingLineTest ? 'กำลังส่ง...' : 'ส่งข้อความทดสอบ'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }
