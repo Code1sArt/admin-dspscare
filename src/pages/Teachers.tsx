@@ -19,6 +19,12 @@ interface Teacher {
     lineUserId: string | null;
 }
 
+type StaffRole = Teacher['role'];
+
+interface CurrentUser {
+    id: string;
+}
+
 const ITEMS_PER_PAGE = 10; // กำหนดจำนวนแถวต่อหน้า
 
 const getTeacherId = (teacher: Teacher) => teacher.id ?? teacher.userId ?? teacher._id ?? '';
@@ -94,6 +100,7 @@ const validateExcelFile = async (file: File, requiredColumns: string[]) => {
 export default function Teachers() {
     const [teachers, setTeachers] = useState<Teacher[]>([]);
     const [loading, setLoading] = useState(true);
+    const [currentUserId, setCurrentUserId] = useState('');
 
     // --- State สำหรับค้นหาและกรอง ---
     const [searchQuery, setSearchQuery] = useState('');
@@ -106,9 +113,15 @@ export default function Teachers() {
     const [editId, setEditId] = useState<string | null>(null);
     const [formData, setFormData] = useState({ citizenId: '', firstName: '', lastName: '', role: 'TEACHER' });
 
-    useEffect(() => {
-        fetchTeachers();
-    }, []);
+    const fetchCurrentUser = async () => {
+        try {
+            const response = await api.get<CurrentUser>('/users/me');
+            setCurrentUserId(response.data.id);
+        } catch {
+            // Backend ยังคงตรวจสอบสิทธิ์ซ้ำ แม้โหลดข้อมูลผู้ใช้ปัจจุบันไม่สำเร็จ
+            setCurrentUserId('');
+        }
+    };
 
     const fetchTeachers = async () => {
         try {
@@ -116,13 +129,18 @@ export default function Teachers() {
             const response = await api.get('/teachers/staff');
             setTeachers(response.data);
             return response.data as Teacher[];
-        } catch (error) {
+        } catch {
             toast.error('ไม่สามารถโหลดข้อมูลบุคลากรได้');
             return [];
         } finally {
             setLoading(false);
         }
     };
+
+    useEffect(() => {
+        void fetchTeachers();
+        void fetchCurrentUser();
+    }, []);
 
     // --- Logic การค้นหาและแบ่งหน้า (Client-side Pagination) ---
     const filteredData = useMemo(() => {
@@ -177,11 +195,19 @@ export default function Teachers() {
                     return;
                 }
 
+                const updatePayload = editId === currentUserId
+                    ? {
+                        citizenId: formData.citizenId,
+                        firstName: formData.firstName,
+                        lastName: formData.lastName
+                    }
+                    : formData;
+
                 try {
-                    await api.patch(`/teachers/staff/${editId}`, formData);
+                    await api.patch(`/teachers/staff/${editId}`, updatePayload);
                 } catch (error: any) {
                     if (!shouldFallbackToUsersEndpoint(error)) throw error;
-                    await api.patch(`/users/${editId}`, formData);
+                    await api.patch(`/users/${editId}`, updatePayload);
                 }
                 toast.success('แก้ไขข้อมูลสำเร็จ', { id: toastId });
             }
@@ -440,7 +466,14 @@ export default function Teachers() {
                         ) : (
                             paginatedData.map((t) => (
                                 <tr key={getTeacherId(t) || t.citizenId} className="hover:bg-gray-50 transition-colors">
-                                    <td className="p-4 font-medium text-gray-800">{t.firstName} {t.lastName}</td>
+                                    <td className="p-4 font-medium text-gray-800">
+                                        {t.firstName} {t.lastName}
+                                        {getTeacherId(t) === currentUserId && (
+                                            <span className="ml-2 rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-bold text-primary">
+                                                บัญชีของคุณ
+                                            </span>
+                                        )}
+                                    </td>
                                     <td className="p-4 text-gray-600 font-mono text-sm">{t.citizenId}</td>
                                     <td className="p-4">
                                         <span className={`px-2.5 py-1 rounded-full text-xs font-bold ${t.role === 'ADMIN' ? 'bg-red-100 text-red-700' :
@@ -528,13 +561,20 @@ export default function Teachers() {
                                 <label className="block text-sm font-bold text-gray-700 mb-1 text-red-600">ระดับสิทธิ์การใช้งาน</label>
                                 <select
                                     value={formData.role}
-                                    onChange={(e) => setFormData({ ...formData, role: e.target.value as any })}
-                                    className="w-full border border-gray-300 rounded-lg px-3 py-2 outline-none focus:ring-1 focus:ring-primary bg-white"
+                                    onChange={(e) => setFormData({ ...formData, role: e.target.value as StaffRole })}
+                                    disabled={modalMode === 'EDIT' && editId === currentUserId}
+                                    aria-describedby={modalMode === 'EDIT' && editId === currentUserId ? 'own-role-help' : undefined}
+                                    className="w-full border border-gray-300 rounded-lg px-3 py-2 outline-none focus:ring-1 focus:ring-primary bg-white disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-500"
                                 >
                                     <option value="TEACHER">TEACHER (ครูที่ปรึกษา)</option>
                                     <option value="AFFAIRS">AFFAIRS (ฝ่ายกิจการนักเรียน)</option>
                                     <option value="ADMIN">ADMIN (ผู้ดูแลระบบสูงสุด)</option>
                                 </select>
+                                {modalMode === 'EDIT' && editId === currentUserId && (
+                                    <p id="own-role-help" className="mt-2 text-xs font-medium text-amber-700">
+                                        ไม่สามารถเปลี่ยนระดับสิทธิ์ของบัญชีที่กำลังใช้งานได้
+                                    </p>
+                                )}
                             </div>
                             <div className="pt-4 flex gap-3">
                                 <button type="button" onClick={() => setIsModalOpen(false)} className="flex-1 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg font-bold text-gray-700 transition-colors">ยกเลิก</button>
