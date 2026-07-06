@@ -217,6 +217,7 @@ export default function Students() {
     const [classrooms, setClassrooms] = useState<Classroom[]>([]);
     const [students, setStudents] = useState<Student[]>([]);
     const [loading, setLoading] = useState(false);
+    const [deletingStudentId, setDeletingStudentId] = useState<string | null>(null);
 
     // --- Filter States ---
     const [selectedTermId, setSelectedTermId] = useState<string>('');
@@ -365,26 +366,38 @@ export default function Students() {
         }
     };
 
-    const handleDelete = (id: string, name: string) => {
-        Swal.fire({
-            title: 'ยืนยันการลบ?',
-            text: `ต้องการลบข้อมูลของ ${name} หรือไม่? ประวัติพฤติกรรมจะถูกลบไปด้วย`,
+    const handleDelete = async (id: string, name: string) => {
+        const result = await Swal.fire({
+            title: 'ยืนยันการลบนักเรียน?',
+            html: `
+                <div style="text-align:left; font-size:14px; line-height:1.7">
+                    <p>ต้องการลบข้อมูลของ <b>${escapeHtml(name)}</b> ใช่หรือไม่?</p>
+                    <p style="margin-top:10px; color:#b91c1c">
+                        บัญชี ประวัติการเช็คชื่อ คะแนนพฤติกรรม ประวัติห้องเรียน
+                        และข้อมูลการเลื่อนชั้นของนักเรียนจะถูกลบถาวร
+                    </p>
+                </div>
+            `,
             icon: 'warning',
             showCancelButton: true,
             confirmButtonColor: '#ef4444',
-            confirmButtonText: 'ใช่, ลบเลย',
+            confirmButtonText: 'ลบข้อมูลถาวร',
             cancelButtonText: 'ยกเลิก'
-        }).then(async (result) => {
-            if (result.isConfirmed) {
-                try {
-                    await api.delete(`/students/${id}`);
-                    toast.success('ลบข้อมูลสำเร็จ');
-                    fetchStudents(selectedClassroomId);
-                } catch (error) {
-                    toast.error('ลบข้อมูลไม่สำเร็จ');
-                }
-            }
         });
+
+        if (!result.isConfirmed) return;
+
+        const toastId = toast.loading('กำลังลบนักเรียนและข้อมูลที่เกี่ยวข้อง...');
+        setDeletingStudentId(id);
+        try {
+            await api.delete(`/students/${id}`);
+            toast.success('ลบนักเรียนและข้อมูลที่เกี่ยวข้องสำเร็จ', { id: toastId });
+            await fetchStudents(selectedClassroomId);
+        } catch (error) {
+            toast.error(getErrorMessages(error, 'ลบข้อมูลไม่สำเร็จ')[0], { id: toastId });
+        } finally {
+            setDeletingStudentId(null);
+        }
     };
 
     // --- นำเข้าผ่าน Excel ---
@@ -707,8 +720,15 @@ export default function Students() {
                                                         <button onClick={() => handleOpenEdit(s)} title="แก้ไข" className="p-1.5 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded">
                                                             <Edit size={18} />
                                                         </button>
-                                                        <button onClick={() => handleDelete(s.id, s.firstName)} title="ลบ" className="p-1.5 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded">
-                                                            <Trash2 size={18} />
+                                                        <button
+                                                            onClick={() => void handleDelete(s.id, `${s.firstName} ${s.lastName}`)}
+                                                            title="ลบ"
+                                                            disabled={deletingStudentId !== null}
+                                                            className="p-1.5 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded disabled:cursor-not-allowed disabled:opacity-40"
+                                                        >
+                                                            {deletingStudentId === s.id
+                                                                ? <span className="block h-[18px] w-[18px] animate-spin rounded-full border-2 border-red-200 border-t-red-600" />
+                                                                : <Trash2 size={18} />}
                                                         </button>
                                                     </div>
                                                 </td>
