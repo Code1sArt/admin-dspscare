@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import {
     Search, Calendar, Filter, FileText, BarChart2,
-    CheckCircle, XCircle, Clock, Info, AlertTriangle, ChevronLeft, ChevronRight
+    CheckCircle, XCircle, Clock, Info, AlertTriangle, ChevronLeft, ChevronRight, Activity
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '../services/api';
@@ -18,7 +18,7 @@ interface Classroom {
 interface AttendanceRecord {
     id: string;
     type: 'ASSEMBLY' | 'AREA';
-    status: 'PRESENT' | 'ABSENT' | 'LATE' | 'LEAVE';
+    status: 'PRESENT' | 'ABSENT' | 'LATE' | 'LEAVE' | 'ACTIVITY';
     date: string;
     student: {
         citizenId: string;
@@ -40,6 +40,7 @@ interface SummaryStatistics {
     absent: number;
     late: number;
     leave: number;
+    activity?: number;
 }
 
 interface SummaryPercentage {
@@ -47,6 +48,7 @@ interface SummaryPercentage {
     absent: number;
     late: number;
     leave: number;
+    activity?: number;
     notChecked: number;
 }
 
@@ -171,6 +173,7 @@ export default function AttendanceReports() {
         มาเรียน: s.statistics.present,
         มาสาย: s.statistics.late,
         ลา: s.statistics.leave,
+        กิจกรรม: s.statistics.activity ?? 0,
         ขาด: s.statistics.absent,
         ยังไม่เช็ค: s.statistics.notChecked,
     }));
@@ -182,6 +185,7 @@ export default function AttendanceReports() {
             case 'ABSENT': return <span className="bg-red-100 text-red-700 px-2 py-1 rounded-full text-xs font-bold flex items-center gap-1 w-fit"><XCircle size={12} /> ขาด</span>;
             case 'LATE': return <span className="bg-orange-100 text-orange-700 px-2 py-1 rounded-full text-xs font-bold flex items-center gap-1 w-fit"><Clock size={12} /> สาย</span>;
             case 'LEAVE': return <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded-full text-xs font-bold flex items-center gap-1 w-fit"><Info size={12} /> ลา</span>;
+            case 'ACTIVITY': return <span className="bg-cyan-100 text-cyan-700 px-2 py-1 rounded-full text-xs font-bold flex items-center gap-1 w-fit"><Activity size={12} /> กิจกรรม</span>;
             default: return <span className="bg-gray-100 text-gray-700 px-2 py-1 rounded-full text-xs font-bold w-fit">{status}</span>;
         }
     };
@@ -359,6 +363,7 @@ export default function AttendanceReports() {
                                         <Bar dataKey="มาเรียน" stackId="a" fill="#10B981" radius={[0, 0, 4, 4]} />
                                         <Bar dataKey="มาสาย" stackId="a" fill="#F59E0B" />
                                         <Bar dataKey="ลา" stackId="a" fill="#3B82F6" />
+                                        <Bar dataKey="กิจกรรม" stackId="a" fill="#06B6D4" />
                                         <Bar dataKey="ขาด" stackId="a" fill="#EF4444" />
                                         <Bar dataKey="ยังไม่เช็ค" stackId="a" fill="#E5E7EB" radius={[4, 4, 0, 0]} />
                                     </BarChart>
@@ -377,15 +382,16 @@ export default function AttendanceReports() {
                                         <th className="p-4 font-medium text-center text-green-700">มาเรียน</th>
                                         <th className="p-4 font-medium text-center text-orange-600">สาย</th>
                                         <th className="p-4 font-medium text-center text-blue-600">ลา</th>
+                                        <th className="p-4 font-medium text-center text-cyan-600">กิจกรรม</th>
                                         <th className="p-4 font-medium text-center text-red-600">ขาด</th>
                                         <th className="p-4 font-medium text-center text-gray-500">ยังไม่เช็คชื่อ</th>
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-gray-100">
                                     {loading ? (
-                                        <tr><td colSpan={7} className="p-8 text-center text-gray-500">กำลังโหลดตารางสถิติ...</td></tr>
+                                        <tr><td colSpan={8} className="p-8 text-center text-gray-500">กำลังโหลดตารางสถิติ...</td></tr>
                                     ) : paginatedSummary.length === 0 ? (
-                                        <tr><td colSpan={7} className="p-8 text-center text-gray-500">ไม่พบข้อมูลสรุป</td></tr>
+                                        <tr><td colSpan={8} className="p-8 text-center text-gray-500">ไม่พบข้อมูลสรุป</td></tr>
                                     ) : (
                                         paginatedSummary.map((s) => (
                                             <tr key={s.classroomId} className="hover:bg-gray-50 transition-colors">
@@ -402,6 +408,10 @@ export default function AttendanceReports() {
                                                 <td className="p-4 text-center">
                                                     <span className="font-bold text-blue-500">{s.statistics.leave}</span>
                                                     <span className="text-xs text-gray-400 ml-1">({s.percentages.leave}%)</span>
+                                                </td>
+                                                <td className="p-4 text-center">
+                                                    <span className="font-bold text-cyan-600">{s.statistics.activity ?? 0}</span>
+                                                    <span className="text-xs text-gray-400 ml-1">({s.percentages.activity ?? 0}%)</span>
                                                 </td>
                                                 <td className="p-4 text-center">
                                                     <span className="font-bold text-red-500">{s.statistics.absent}</span>

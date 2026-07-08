@@ -101,6 +101,7 @@ interface AttendanceSummaryItem {
         absent: number;
         late: number;
         leave: number;
+        activity?: number;
     };
 }
 
@@ -217,9 +218,10 @@ export default function Dashboard() {
                 present: total.present + item.statistics.present,
                 absent: total.absent + item.statistics.absent,
                 late: total.late + item.statistics.late,
-                leave: total.leave + item.statistics.leave
+                leave: total.leave + item.statistics.leave,
+                activity: total.activity + (item.statistics.activity ?? 0)
             }),
-            { students: 0, checked: 0, notChecked: 0, present: 0, absent: 0, late: 0, leave: 0 }
+            { students: 0, checked: 0, notChecked: 0, present: 0, absent: 0, late: 0, leave: 0, activity: 0 }
         );
     }, [attendanceSummary]);
 
@@ -570,6 +572,12 @@ export default function Dashboard() {
                             value={attendanceTotals.leave}
                             total={attendanceTotals.students}
                             color="bg-primary/70"
+                        />
+                        <AttendanceBar
+                            label="กิจกรรม"
+                            value={attendanceTotals.activity}
+                            total={attendanceTotals.students}
+                            color="bg-cyan-500"
                         />
                         <AttendanceBar
                             label="ขาด"
