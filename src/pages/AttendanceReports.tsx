@@ -21,6 +21,8 @@ interface AcademicTerm {
     id: number;
     term: number;
     year: number;
+    startDate?: string | null;
+    endDate?: string | null;
     isActive: boolean;
 }
 
@@ -72,6 +74,37 @@ interface SummaryData {
 const ITEMS_PER_PAGE = 10;
 
 const getTodayString = () => new Date().toISOString().split('T')[0];
+
+const dateOnly = (date: string) => date.match(/^\d{4}-\d{2}-\d{2}/)?.[0] ?? date;
+
+const parseIsoDate = (date: string) => {
+    const [year, month, day] = dateOnly(date).split('-').map(Number);
+    return new Date(year, month - 1, day);
+};
+
+const toIsoDate = (date: Date) => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+};
+
+const getDateRange = (startDate?: string | null, endDate?: string | null) => {
+    if (!startDate || !endDate) return [];
+
+    const start = parseIsoDate(startDate);
+    const end = parseIsoDate(endDate);
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || start > end) return [];
+
+    const dates: string[] = [];
+    const cursor = new Date(start);
+    while (cursor <= end) {
+        dates.push(toIsoDate(cursor));
+        cursor.setDate(cursor.getDate() + 1);
+    }
+
+    return dates;
+};
 
 const formatDateTime = (date: string) =>
     new Date(date).toLocaleString('th-TH', {
@@ -292,13 +325,41 @@ export default function AttendanceReports() {
     };
 
     const fetchStudentAttendanceForExport = async (record: AttendanceRecord) => {
-        const params = new URLSearchParams();
-        if (activeTerm?.id) params.append('termId', String(activeTerm.id));
-        if (record.student.id) params.append('studentId', record.student.id);
-        params.append('citizenId', record.student.citizenId);
+        const termDates = getDateRange(activeTerm?.startDate, activeTerm?.endDate);
+        if (!activeTerm?.id || termDates.length === 0) {
+            toast.error('ไม่พบช่วงวันที่ของภาคเรียนปัจจุบัน');
+            return [];
+        }
 
-        const res = await api.get(`/attendance/history/daily?${params.toString()}`);
-        return parseAttendanceRecords(res.data);
+        const records: AttendanceRecord[] = [];
+        const batchSize = 8;
+
+        for (let index = 0; index < termDates.length; index += batchSize) {
+            const batch = termDates.slice(index, index + batchSize);
+            const batchResults = await Promise.all(batch.map(async (date) => {
+                const params = new URLSearchParams();
+                params.append('termId', String(activeTerm.id));
+                params.append('date', date);
+                if (record.student.id) params.append('studentId', record.student.id);
+                params.append('citizenId', record.student.citizenId);
+
+                try {
+                    const res = await api.get(`/attendance/history/daily?${params.toString()}`);
+                    return parseAttendanceRecords(res.data);
+                } catch (error) {
+                    return [];
+                }
+            }));
+
+            records.push(...batchResults.flat());
+        }
+
+        const uniqueRecords = new Map<string, AttendanceRecord>();
+        records
+            .filter(item => item.student.citizenId === record.student.citizenId)
+            .forEach(item => uniqueRecords.set(item.id, item));
+
+        return Array.from(uniqueRecords.values());
     };
 
     const handleExportSchoolDaily = async () => {
@@ -362,10 +423,9 @@ export default function AttendanceReports() {
         try {
             setExportingKey(exportKey);
             const records = await fetchStudentAttendanceForExport(record);
-            const studentRecords = records.filter(item => item.student.citizenId === record.student.citizenId);
 
             exportAttendanceWorkbook(
-                studentRecords,
+                records,
                 [
                     ['ประเภทไฟล์', 'รายบุคคลทั้งภาคเรียนปัจจุบัน'],
                     ['นักเรียน', `${studentName} (${record.student.citizenId})`],
