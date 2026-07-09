@@ -4,6 +4,7 @@ import {
     CalendarDays,
     ChevronRight,
     ClipboardCheck,
+    ClipboardPenLine,
     DoorOpen,
     GraduationCap,
     Home,
@@ -55,6 +56,7 @@ const menuSections: MenuSection[] = [
             { name: 'ประเภทคะแนน', path: '/point-categories', icon: ListChecks },
             { name: 'คะแนนพฤติกรรม', path: '/behavior-points', icon: ShieldCheck },
             { name: 'รายงานการเช็คชื่อ', path: '/attendance-reports', icon: ClipboardCheck },
+            { name: 'แก้ไขการเช็คชื่อ', path: '/attendance-editor', icon: ClipboardPenLine },
             { name: 'ติดตามการเช็คชื่อ', path: '/attendance-monitoring', icon: Bell },
             { name: 'ปฏิทินการศึกษา', path: '/academic-calendar', icon: CalendarDays }
         ]

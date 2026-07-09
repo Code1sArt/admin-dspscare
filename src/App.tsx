@@ -11,6 +11,7 @@ import Settings from './pages/Settings';
 import Classrooms from './pages/Classrooms';
 import PointCategories from './pages/PointCategories';
 import AttendanceReports from './pages/AttendanceReports';
+import AttendanceEditor from './pages/AttendanceEditor';
 import AdminBehaviorManagement from './pages/AdminBehaviorManagement';
 import AttendanceMonitoring from './pages/AttendanceMonitoring';
 import SchoolSummary from './pages/SchoolSummary';
@@ -66,6 +67,7 @@ function App() {
           <Route path="classrooms" element={<Classrooms />} />
           <Route path="point-categories" element={<PointCategories />} />
           <Route path="attendance-reports" element={<AttendanceReports />} />
+          <Route path="attendance-editor" element={<AttendanceEditor />} />
           <Route path="settings" element={<Settings />} />
           <Route path="behavior-points" element={<AdminBehaviorManagement />} />
           <Route path="attendance-monitoring" element={<AttendanceMonitoring />} />
