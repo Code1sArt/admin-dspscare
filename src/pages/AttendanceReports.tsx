@@ -291,6 +291,21 @@ export default function AttendanceReports() {
         return parseAttendanceRecords(res.data);
     };
 
+    const fetchStudentAttendanceForExport = async (record: AttendanceRecord) => {
+        const params = new URLSearchParams();
+        if (activeTerm?.id) params.append('termId', String(activeTerm.id));
+        if (record.student.id) params.append('studentId', record.student.id);
+        params.append('citizenId', record.student.citizenId);
+
+        try {
+            const res = await api.get(`/attendance/history?${params.toString()}`);
+            return parseAttendanceRecords(res.data);
+        } catch (error) {
+            const res = await api.get(`/attendance/history/daily?${params.toString()}`);
+            return parseAttendanceRecords(res.data);
+        }
+    };
+
     const handleExportSchoolDaily = async () => {
         const exportKey = 'school-daily';
         try {
@@ -345,19 +360,13 @@ export default function AttendanceReports() {
         }
     };
 
-    const handleExportStudentTerm = async (record: AttendanceRecord) => {
+    const handleExportStudentCurrentTerm = async (record: AttendanceRecord) => {
         const studentName = `${record.student.firstName} ${record.student.lastName}`;
         const exportKey = `student-${record.student.citizenId}`;
 
         try {
             setExportingKey(exportKey);
-            const params = new URLSearchParams();
-            if (activeTerm?.id) params.append('termId', String(activeTerm.id));
-            if (record.student.id) params.append('studentId', record.student.id);
-            params.append('citizenId', record.student.citizenId);
-            if (filterType !== 'ALL') params.append('type', filterType);
-
-            const records = await fetchAttendanceForExport(params);
+            const records = await fetchStudentAttendanceForExport(record);
             const studentRecords = records.filter(item => item.student.citizenId === record.student.citizenId);
 
             exportAttendanceWorkbook(
@@ -367,7 +376,8 @@ export default function AttendanceReports() {
                     ['นักเรียน', `${studentName} (${record.student.citizenId})`],
                     ['ห้องเรียน', record.student.classroom?.name ?? ''],
                     ['ภาคเรียน', activeTerm ? `ภาคเรียน ${activeTerm.term}/${activeTerm.year}` : 'ภาคเรียนปัจจุบัน'],
-                    ['ประเภทการเช็คชื่อ', filterType === 'ALL' ? 'รวมทุกประเภท' : getTypeLabel(filterType)]
+                    ['ช่วงข้อมูล', 'ทุกวันที่ในภาคเรียนปัจจุบัน'],
+                    ['ประเภทการเช็คชื่อ', 'รวมทุกประเภท']
                 ],
                 `ประวัติเช็คชื่อ_${studentName}_${activeTerm ? `${activeTerm.term}-${activeTerm.year}` : 'เทอมปัจจุบัน'}.xlsx`,
                 studentName
@@ -510,10 +520,10 @@ export default function AttendanceReports() {
                                                 <div className="flex items-center gap-2">
                                                     <span className="font-bold text-gray-800">{record.student.firstName} {record.student.lastName}</span>
                                                     <button
-                                                        onClick={() => handleExportStudentTerm(record)}
+                                                        onClick={() => handleExportStudentCurrentTerm(record)}
                                                         disabled={exportingKey !== null}
                                                         className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-primary/20 bg-white px-2.5 py-1 text-xs font-bold text-primary transition-colors hover:bg-primary/5 disabled:opacity-60"
-                                                        title="Export ประวัติการเช็คชื่อทั้งเทอมของนักเรียนคนนี้"
+                                                        title="Export ประวัติการเช็คชื่อทุกวันที่ในเทอมปัจจุบันของนักเรียนคนนี้"
                                                     >
                                                         <FileDown size={13} /> Excel
                                                     </button>
