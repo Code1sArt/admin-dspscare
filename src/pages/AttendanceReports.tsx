@@ -297,13 +297,8 @@ export default function AttendanceReports() {
         if (record.student.id) params.append('studentId', record.student.id);
         params.append('citizenId', record.student.citizenId);
 
-        try {
-            const res = await api.get(`/attendance/history?${params.toString()}`);
-            return parseAttendanceRecords(res.data);
-        } catch (error) {
-            const res = await api.get(`/attendance/history/daily?${params.toString()}`);
-            return parseAttendanceRecords(res.data);
-        }
+        const res = await api.get(`/attendance/history/daily?${params.toString()}`);
+        return parseAttendanceRecords(res.data);
     };
 
     const handleExportSchoolDaily = async () => {
