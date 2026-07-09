@@ -1,9 +1,10 @@
 import { useState, useEffect, useMemo } from 'react';
 import {
     Search, Calendar, Filter, FileText, BarChart2,
-    CheckCircle, XCircle, Clock, Info, AlertTriangle, ChevronLeft, ChevronRight, Activity
+    CheckCircle, XCircle, Clock, Info, AlertTriangle, ChevronLeft, ChevronRight, Activity, FileDown
 } from 'lucide-react';
 import toast from 'react-hot-toast';
+import * as XLSX from 'xlsx';
 import api from '../services/api';
 import {
     BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer
@@ -13,6 +14,14 @@ import {
 interface Classroom {
     id: number;
     name: string;
+    termId?: number;
+}
+
+interface AcademicTerm {
+    id: number;
+    term: number;
+    year: number;
+    isActive: boolean;
 }
 
 interface AttendanceRecord {
@@ -21,6 +30,7 @@ interface AttendanceRecord {
     status: 'PRESENT' | 'ABSENT' | 'LATE' | 'LEAVE' | 'ACTIVITY';
     date: string;
     student: {
+        id?: string;
         citizenId: string;
         firstName: string;
         lastName: string;
@@ -63,10 +73,46 @@ const ITEMS_PER_PAGE = 10;
 
 const getTodayString = () => new Date().toISOString().split('T')[0];
 
+const formatDateTime = (date: string) =>
+    new Date(date).toLocaleString('th-TH', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+    });
+
+const getStatusLabel = (status: string) => {
+    switch (status) {
+        case 'PRESENT': return 'มาเรียน';
+        case 'ABSENT': return 'ขาด';
+        case 'LATE': return 'สาย';
+        case 'LEAVE': return 'ลา';
+        case 'ACTIVITY': return 'กิจกรรม';
+        default: return status;
+    }
+};
+
+const getTypeLabel = (type: string) => type === 'ASSEMBLY' ? 'เข้าแถวหน้าเสาธง' : 'เวรเขตพื้นที่';
+
+const safeSheetName = (name: string) => name.replace(/[\\/?*[\]:]/g, '').slice(0, 31) || 'Attendance';
+
+const parseAttendanceRecords = (data: any): AttendanceRecord[] => {
+    if (Array.isArray(data)) return data;
+    if (Array.isArray(data?.records)) return data.records;
+
+    return [
+        ...(data?.records?.ASSEMBLY || []),
+        ...(data?.records?.AREA || [])
+    ];
+};
+
 export default function AttendanceReports() {
     const [activeTab, setActiveTab] = useState<'HISTORY' | 'SUMMARY'>('HISTORY');
     const [loading, setLoading] = useState(false);
     const [classrooms, setClassrooms] = useState<Classroom[]>([]);
+    const [activeTerm, setActiveTerm] = useState<AcademicTerm | null>(null);
+    const [exportingKey, setExportingKey] = useState<string | null>(null);
 
     // --- Filters State ---
     const [filterDate, setFilterDate] = useState(getTodayString());
@@ -82,9 +128,15 @@ export default function AttendanceReports() {
     const [historyRecords, setHistoryRecords] = useState<AttendanceRecord[]>([]);
     const [summaryData, setSummaryData] = useState<SummaryData[]>([]);
 
-    // 1. ดึงรายชื่อห้องเรียน
+    // 1. ดึงรายชื่อห้องเรียนและภาคเรียนปัจจุบัน
     useEffect(() => {
-        api.get('/classrooms').then(res => setClassrooms(res.data)).catch(() => { });
+        Promise.all([
+            api.get('/classrooms'),
+            api.get('/terms')
+        ]).then(([classroomsRes, termsRes]) => {
+            setClassrooms(classroomsRes.data);
+            setActiveTerm(termsRes.data.find((term: AcademicTerm) => term.isActive) ?? termsRes.data[0] ?? null);
+        }).catch(() => { });
     }, []);
 
     // 2. ดึงข้อมูลเมื่อ Filter เปลี่ยน
@@ -111,11 +163,7 @@ export default function AttendanceReports() {
             if (filterType !== 'ALL') params.append('type', filterType);
 
             const res = await api.get(`/attendance/history/daily?${params.toString()}`);
-            const combined = [
-                ...(res.data.records.ASSEMBLY || []),
-                ...(res.data.records.AREA || [])
-            ];
-            setHistoryRecords(combined);
+            setHistoryRecords(parseAttendanceRecords(res.data));
         } catch (error) {
             toast.error('ไม่สามารถโหลดประวัติการเช็คชื่อได้');
         } finally {
@@ -178,6 +226,159 @@ export default function AttendanceReports() {
         ยังไม่เช็ค: s.statistics.notChecked,
     }));
 
+    const exportAttendanceWorkbook = (
+        records: AttendanceRecord[],
+        summaryRows: (string | number)[][],
+        fileName: string,
+        sheetName: string
+    ) => {
+        if (records.length === 0) {
+            toast.error('ไม่มีข้อมูลสำหรับส่งออก');
+            return;
+        }
+
+        const rows = records
+            .slice()
+            .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+            .map((record, index) => ({
+                ลำดับ: index + 1,
+                'วันที่/เวลา': formatDateTime(record.date),
+                'วันที่': new Date(record.date).toLocaleDateString('th-TH'),
+                'เวลา': `${new Date(record.date).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })} น.`,
+                'ประเภท': getTypeLabel(record.type),
+                'รหัสนักเรียน': record.student.citizenId,
+                'ชื่อ': record.student.firstName,
+                'นามสกุล': record.student.lastName,
+                'ชื่อ-นามสกุล': `${record.student.firstName} ${record.student.lastName}`,
+                'ห้องเรียน': record.student.classroom?.name ?? '',
+                'สถานะ': getStatusLabel(record.status),
+                'ผู้บันทึก': `${record.recorder?.firstName ?? ''} ${record.recorder?.lastName ?? ''}`.trim()
+            }));
+
+        const workbook = XLSX.utils.book_new();
+        const worksheet = XLSX.utils.json_to_sheet(rows);
+        const summarySheet = XLSX.utils.aoa_to_sheet([
+            ['รายงานการเช็คชื่อ'],
+            ['วันที่ส่งออก', formatDateTime(new Date().toISOString())],
+            ...summaryRows,
+            ['จำนวนรายการ', records.length]
+        ]);
+
+        worksheet['!cols'] = [
+            { wch: 8 },
+            { wch: 22 },
+            { wch: 16 },
+            { wch: 12 },
+            { wch: 20 },
+            { wch: 18 },
+            { wch: 18 },
+            { wch: 18 },
+            { wch: 30 },
+            { wch: 14 },
+            { wch: 14 },
+            { wch: 24 }
+        ];
+        summarySheet['!cols'] = [{ wch: 24 }, { wch: 48 }];
+
+        XLSX.utils.book_append_sheet(workbook, worksheet, safeSheetName(sheetName));
+        XLSX.utils.book_append_sheet(workbook, summarySheet, 'สรุปเงื่อนไข');
+        XLSX.writeFile(workbook, fileName);
+        toast.success('ส่งออกไฟล์ Excel สำเร็จ');
+    };
+
+    const fetchAttendanceForExport = async (params: URLSearchParams) => {
+        const res = await api.get(`/attendance/history/daily?${params.toString()}`);
+        return parseAttendanceRecords(res.data);
+    };
+
+    const handleExportSchoolDaily = async () => {
+        const exportKey = 'school-daily';
+        try {
+            setExportingKey(exportKey);
+            const params = new URLSearchParams();
+            if (filterDate) params.append('date', filterDate);
+            if (filterType !== 'ALL') params.append('type', filterType);
+
+            const records = await fetchAttendanceForExport(params);
+            exportAttendanceWorkbook(
+                records,
+                [
+                    ['ประเภทไฟล์', 'ทั้งโรงเรียนรายวัน'],
+                    ['วันที่', filterDate || 'ทุกวันที่'],
+                    ['ประเภทการเช็คชื่อ', filterType === 'ALL' ? 'รวมทุกประเภท' : getTypeLabel(filterType)]
+                ],
+                `รายงานเช็คชื่อทั้งโรงเรียน_${filterDate || getTodayString()}.xlsx`,
+                'ทั้งโรงเรียน'
+            );
+        } catch (error) {
+            toast.error('ไม่สามารถส่งออกรายงานทั้งโรงเรียนได้');
+        } finally {
+            setExportingKey(null);
+        }
+    };
+
+    const handleExportClassroomDaily = async (classroomId: number, classroomName: string) => {
+        const exportKey = `classroom-${classroomId}`;
+        try {
+            setExportingKey(exportKey);
+            const params = new URLSearchParams();
+            if (filterDate) params.append('date', filterDate);
+            params.append('classroomId', String(classroomId));
+            if (filterType !== 'ALL') params.append('type', filterType);
+
+            const records = await fetchAttendanceForExport(params);
+            exportAttendanceWorkbook(
+                records,
+                [
+                    ['ประเภทไฟล์', 'รายห้องรายวัน'],
+                    ['ห้องเรียน', classroomName],
+                    ['วันที่', filterDate || 'ทุกวันที่'],
+                    ['ประเภทการเช็คชื่อ', filterType === 'ALL' ? 'รวมทุกประเภท' : getTypeLabel(filterType)]
+                ],
+                `รายงานเช็คชื่อ_${classroomName}_${filterDate || getTodayString()}.xlsx`,
+                classroomName
+            );
+        } catch (error) {
+            toast.error('ไม่สามารถส่งออกรายงานรายห้องได้');
+        } finally {
+            setExportingKey(null);
+        }
+    };
+
+    const handleExportStudentTerm = async (record: AttendanceRecord) => {
+        const studentName = `${record.student.firstName} ${record.student.lastName}`;
+        const exportKey = `student-${record.student.citizenId}`;
+
+        try {
+            setExportingKey(exportKey);
+            const params = new URLSearchParams();
+            if (activeTerm?.id) params.append('termId', String(activeTerm.id));
+            if (record.student.id) params.append('studentId', record.student.id);
+            params.append('citizenId', record.student.citizenId);
+            if (filterType !== 'ALL') params.append('type', filterType);
+
+            const records = await fetchAttendanceForExport(params);
+            const studentRecords = records.filter(item => item.student.citizenId === record.student.citizenId);
+
+            exportAttendanceWorkbook(
+                studentRecords,
+                [
+                    ['ประเภทไฟล์', 'รายบุคคลทั้งภาคเรียนปัจจุบัน'],
+                    ['นักเรียน', `${studentName} (${record.student.citizenId})`],
+                    ['ห้องเรียน', record.student.classroom?.name ?? ''],
+                    ['ภาคเรียน', activeTerm ? `ภาคเรียน ${activeTerm.term}/${activeTerm.year}` : 'ภาคเรียนปัจจุบัน'],
+                    ['ประเภทการเช็คชื่อ', filterType === 'ALL' ? 'รวมทุกประเภท' : getTypeLabel(filterType)]
+                ],
+                `ประวัติเช็คชื่อ_${studentName}_${activeTerm ? `${activeTerm.term}-${activeTerm.year}` : 'เทอมปัจจุบัน'}.xlsx`,
+                studentName
+            );
+        } catch (error) {
+            toast.error('ไม่สามารถส่งออกประวัติรายบุคคลได้');
+        } finally {
+            setExportingKey(null);
+        }
+    };
+
     // Helper Elements
     const getStatusBadge = (status: string) => {
         switch (status) {
@@ -203,6 +404,13 @@ export default function AttendanceReports() {
                     <h1 className="text-2xl font-bold text-gray-800">รายงานการเช็คชื่อ</h1>
                     <p className="text-gray-500">ดูประวัติรายบุคคล และสรุปสถิติการมาเรียนรายวัน</p>
                 </div>
+                <button
+                    onClick={handleExportSchoolDaily}
+                    disabled={exportingKey !== null}
+                    className="flex items-center justify-center gap-2 border border-secondary/50 bg-secondary/25 hover:bg-secondary/40 text-[#6b5400] px-5 py-2.5 rounded-lg font-bold transition-colors disabled:opacity-60"
+                >
+                    <FileDown size={20} /> Export ทั้งโรงเรียนรายวัน
+                </button>
             </div>
 
             {/* --- ตัวกรองส่วนกลาง --- */}
@@ -298,7 +506,19 @@ export default function AttendanceReports() {
                                             </td>
                                             <td className="p-4">{getTypeBadge(record.type)}</td>
                                             <td className="p-4 font-mono text-gray-500 text-sm">{record.student.citizenId}</td>
-                                            <td className="p-4 font-bold text-gray-800">{record.student.firstName} {record.student.lastName}</td>
+                                            <td className="p-4">
+                                                <div className="flex items-center gap-2">
+                                                    <span className="font-bold text-gray-800">{record.student.firstName} {record.student.lastName}</span>
+                                                    <button
+                                                        onClick={() => handleExportStudentTerm(record)}
+                                                        disabled={exportingKey !== null}
+                                                        className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-primary/20 bg-white px-2.5 py-1 text-xs font-bold text-primary transition-colors hover:bg-primary/5 disabled:opacity-60"
+                                                        title="Export ประวัติการเช็คชื่อทั้งเทอมของนักเรียนคนนี้"
+                                                    >
+                                                        <FileDown size={13} /> Excel
+                                                    </button>
+                                                </div>
+                                            </td>
                                             <td className="p-4 text-gray-700">{record.student.classroom.name}</td>
                                             <td className="p-4">{getStatusBadge(record.status)}</td>
                                             <td className="p-4 text-gray-500 text-sm text-ellipsis overflow-hidden">
@@ -385,13 +605,14 @@ export default function AttendanceReports() {
                                         <th className="p-4 font-medium text-center text-cyan-600">กิจกรรม</th>
                                         <th className="p-4 font-medium text-center text-red-600">ขาด</th>
                                         <th className="p-4 font-medium text-center text-gray-500">ยังไม่เช็คชื่อ</th>
+                                        <th className="p-4 font-medium text-right">ส่งออก</th>
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-gray-100">
                                     {loading ? (
-                                        <tr><td colSpan={8} className="p-8 text-center text-gray-500">กำลังโหลดตารางสถิติ...</td></tr>
+                                        <tr><td colSpan={9} className="p-8 text-center text-gray-500">กำลังโหลดตารางสถิติ...</td></tr>
                                     ) : paginatedSummary.length === 0 ? (
-                                        <tr><td colSpan={8} className="p-8 text-center text-gray-500">ไม่พบข้อมูลสรุป</td></tr>
+                                        <tr><td colSpan={9} className="p-8 text-center text-gray-500">ไม่พบข้อมูลสรุป</td></tr>
                                     ) : (
                                         paginatedSummary.map((s) => (
                                             <tr key={s.classroomId} className="hover:bg-gray-50 transition-colors">
@@ -425,6 +646,16 @@ export default function AttendanceReports() {
                                                     ) : (
                                                         <span className="text-green-500"><CheckCircle size={16} className="mx-auto" /></span>
                                                     )}
+                                                </td>
+                                                <td className="p-4 text-right">
+                                                    <button
+                                                        onClick={() => handleExportClassroomDaily(s.classroomId, s.classroomName)}
+                                                        disabled={exportingKey !== null}
+                                                        className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-primary/20 bg-white px-3 py-1.5 text-xs font-bold text-primary transition-colors hover:bg-primary/5 disabled:opacity-60"
+                                                        title="Export รายชื่อนักเรียนและประวัติเช็คชื่อของห้องนี้ในวันที่เลือก"
+                                                    >
+                                                        <FileDown size={14} /> Excel
+                                                    </button>
                                                 </td>
                                             </tr>
                                         ))
