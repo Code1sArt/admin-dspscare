@@ -14,7 +14,9 @@ import {
     ShieldCheck,
     Sparkles,
     UserCheck,
+    UserMinus,
     UserPlus,
+    UserRoundX,
     Users,
     type LucideIcon
 } from 'lucide-react';
@@ -44,10 +46,12 @@ const menuSections: MenuSection[] = [
         title: 'จัดการข้อมูลหลัก',
         items: [
             { name: 'จัดการนักเรียน', path: '/students', icon: Users },
+            { name: 'รายชื่อนักเรียนนอกระบบ', path: '/inactive-students', icon: UserMinus },
             { name: 'จัดการบุคลากร', path: '/teachers', icon: UserCheck },
             { name: 'จัดการผู้ปกครอง', path: '/parents', icon: UserPlus },
             { name: 'จัดการห้องเรียน', path: '/classrooms', icon: DoorOpen },
-            { name: 'เลื่อนชั้น / เปลี่ยนเทอม', path: '/promotions', icon: GraduationCap }
+            { name: 'เลื่อนชั้น / เปลี่ยนเทอม', path: '/promotions', icon: GraduationCap },
+            { name: 'นักเรียนย้าย/พักการเรียน', path: '/student-enrollment-changes', icon: UserRoundX }
         ]
     },
     {

@@ -17,6 +17,8 @@ import AttendanceMonitoring from './pages/AttendanceMonitoring';
 import SchoolSummary from './pages/SchoolSummary';
 import AcademicCalendar from './pages/AcademicCalendar';
 import Promotions from './pages/Promotions';
+import StudentEnrollmentChanges from './pages/StudentEnrollmentChanges';
+import InactiveStudents from './pages/InactiveStudents';
 
 // คอมโพเนนต์สำหรับตรวจบัตรผ่าน (Protected Route)
 const ProtectedRoute = ({ children }: { children: JSX.Element }) => {
@@ -74,6 +76,8 @@ function App() {
           <Route path="school-summary" element={<SchoolSummary />} />
           <Route path="academic-calendar" element={<AcademicCalendar />} />
           <Route path="promotions" element={<Promotions />} />
+          <Route path="student-enrollment-changes" element={<StudentEnrollmentChanges />} />
+          <Route path="inactive-students" element={<InactiveStudents />} />
         </Route>
       </Routes>
     </BrowserRouter>
