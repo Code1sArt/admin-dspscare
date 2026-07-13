@@ -28,7 +28,7 @@ interface Student {
     firstName: string;
     lastName: string;
     lineUserId: string | null;
-    classroomId: number;
+    classroomId: number | null;
 }
 
 // Type สำหรับรับข้อมูลจาก /summary/student/{ID}
@@ -315,7 +315,9 @@ export default function Students() {
 
     // --- จัดการฟอร์ม เพิ่ม/แก้ไข ---
     const handleOpenCreate = () => {
-        if (!selectedClassroomId) return toast.error('กรุณาเลือกห้องเรียนจากเมนูด้านบนก่อน');
+        if (!selectedClassroomId || selectedClassroomId === 'unassigned') {
+            return toast.error('กรุณาเลือกห้องเรียนจริงก่อนเพิ่มนักเรียน');
+        }
         setModalMode('CREATE');
         setFormData({
             citizenId: '', firstName: '', lastName: '', password: '', lineUserId: '',
@@ -333,7 +335,7 @@ export default function Students() {
             lastName: s.lastName,
             password: '',
             lineUserId: s.lineUserId || '',
-            classroomId: s.classroomId.toString()
+            classroomId: s.classroomId?.toString() ?? ''
         });
         setIsFormModalOpen(true);
     };
@@ -402,6 +404,10 @@ export default function Students() {
 
     // --- นำเข้าผ่าน Excel ---
     const handleExcelUpload = async () => {
+        if (selectedClassroomId === 'unassigned') {
+            toast.error('กรุณาเลือกห้องเรียนจริงก่อนนำเข้า Excel');
+            return;
+        }
         if (!selectedClassroomId) return toast.error('กรุณาเลือกห้องเรียนที่จะนำเข้าข้อมูลก่อน');
         const targetClass = availableClassrooms.find(c => c.id.toString() === selectedClassroomId);
 
@@ -547,7 +553,9 @@ export default function Students() {
         }
     };
 
-    const getRoomName = (id: number) => classrooms.find(c => c.id === id)?.name || '-';
+    const getRoomName = (id: number | null) => id === null
+        ? 'ไม่มีห้อง (ย้ายออก/พักการเรียน)'
+        : classrooms.find(c => c.id === id)?.name || '-';
 
     return (
         <div className="space-y-6">
@@ -598,14 +606,14 @@ export default function Students() {
                     </button>
                     <button
                         onClick={handleExcelUpload}
-                        disabled={!selectedClassroomId}
+                        disabled={!selectedClassroomId || selectedClassroomId === 'unassigned'}
                         className="flex items-center justify-center gap-2 bg-primary hover:bg-[#0f6b32] disabled:bg-gray-300 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg font-bold transition-colors"
                     >
                         <Upload size={18} /> นำเข้า Excel
                     </button>
                     <button
                         onClick={handleOpenCreate}
-                        disabled={!selectedClassroomId}
+                        disabled={!selectedClassroomId || selectedClassroomId === 'unassigned'}
                         className="flex items-center justify-center gap-2 bg-secondary hover:bg-yellow-300 disabled:bg-gray-300 disabled:cursor-not-allowed text-[#063d1f] px-4 py-2 rounded-lg font-bold transition-colors"
                     >
                         <Plus size={18} /> เพิ่มนักเรียน

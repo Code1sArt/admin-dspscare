@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
     AlertTriangle,
     ArrowRight,
@@ -93,19 +94,18 @@ const modeConfig = {
         previewPath: '/promotions/annual/preview',
         applyPath: '/promotions/annual/apply',
     },
-} satisfies Record<PromotionMode, {
-    title: string;
-    description: string;
-    previewPath: string;
-    applyPath: string;
-}>;
+} satisfies Record<
+    PromotionMode,
+    {
+        title: string;
+        description: string;
+        previewPath: string;
+        applyPath: string;
+    }
+>;
 
 const getErrorMessage = (error: unknown) => {
-    if (
-        typeof error === 'object'
-        && error !== null
-        && 'response' in error
-    ) {
+    if (typeof error === 'object' && error !== null && 'response' in error) {
         const response = (error as { response?: { data?: { message?: string | string[] } } }).response;
         const message = response?.data?.message;
         return Array.isArray(message) ? message.join(', ') : message;
@@ -118,26 +118,25 @@ const createIdempotencyKey = () =>
         ? crypto.randomUUID()
         : `promotion-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
-const createMappings = (
-    rooms: Classroom[],
-    sourceId: number | '',
-    mode: PromotionMode,
-): ClassroomMapping[] => rooms
-    .filter(room => room.termId === Number(sourceId))
-    .sort((a, b) => a.name.localeCompare(b.name, 'th'))
-    .map(room => ({
-        sourceClassroomId: room.id,
-        targetName: mode === 'TERM_ROLLOVER' ? room.name : '',
-        defaultAction: 'MOVE',
-    }));
+const createMappings = (rooms: Classroom[], sourceId: number | '', mode: PromotionMode): ClassroomMapping[] =>
+    rooms
+        .filter((room) => room.termId === Number(sourceId))
+        .sort((a, b) => a.name.localeCompare(b.name, 'th'))
+        .map((room) => ({
+            sourceClassroomId: room.id,
+            targetName: mode === 'TERM_ROLLOVER' ? room.name : '',
+            defaultAction: 'SKIP',
+        }));
 
 export default function Promotions() {
+    const navigate = useNavigate();
     const [mode, setMode] = useState<PromotionMode>('TERM_ROLLOVER');
     const [terms, setTerms] = useState<Term[]>([]);
     const [classrooms, setClassrooms] = useState<Classroom[]>([]);
     const [sourceTermId, setSourceTermId] = useState<number | ''>('');
     const [targetTermId, setTargetTermId] = useState<number | ''>('');
     const [mappings, setMappings] = useState<ClassroomMapping[]>([]);
+    const [selectedRoomIds, setSelectedRoomIds] = useState<number[]>([]);
     const [overrides, setOverrides] = useState<StudentOverride[]>([]);
     const [preview, setPreview] = useState<PreviewResult | null>(null);
     const [previewStale, setPreviewStale] = useState(false);
@@ -148,19 +147,18 @@ export default function Promotions() {
     const [applying, setApplying] = useState(false);
 
     const sourceRooms = useMemo(
-        () => classrooms
-            .filter(room => room.termId === Number(sourceTermId))
-            .sort((a, b) => a.name.localeCompare(b.name, 'th')),
+        () =>
+            classrooms
+                .filter((room) => room.termId === Number(sourceTermId))
+                .sort((a, b) => a.name.localeCompare(b.name, 'th')),
         [classrooms, sourceTermId],
     );
 
     const filteredStudents = useMemo(() => {
         const keyword = search.trim().toLowerCase();
         if (!preview || !keyword) return preview?.students ?? [];
-        return preview.students.filter(student =>
-            `${student.citizenId} ${student.firstName} ${student.lastName}`
-                .toLowerCase()
-                .includes(keyword),
+        return preview.students.filter((student) =>
+            `${student.citizenId} ${student.firstName} ${student.lastName}`.toLowerCase().includes(keyword),
         );
     }, [preview, search]);
 
@@ -174,14 +172,10 @@ export default function Promotions() {
                 ]);
                 setTerms(termsResponse.data);
                 setClassrooms(classroomsResponse.data);
-                const active = termsResponse.data.find(term => term.isActive);
+                const active = termsResponse.data.find((term) => term.isActive);
                 if (active) {
                     setSourceTermId(active.id);
-                    setMappings(createMappings(
-                        classroomsResponse.data,
-                        active.id,
-                        'TERM_ROLLOVER',
-                    ));
+                    setMappings(createMappings(classroomsResponse.data, active.id, 'TERM_ROLLOVER'));
                 }
             } catch {
                 toast.error('โหลดข้อมูลภาคเรียนและห้องเรียนไม่สำเร็จ');
@@ -192,11 +186,9 @@ export default function Promotions() {
         void loadInitialData();
     }, []);
 
-    const resetPlan = (
-        nextMode: PromotionMode,
-        nextSourceTermId: number | '',
-    ) => {
+    const resetPlan = (nextMode: PromotionMode, nextSourceTermId: number | '') => {
         setMappings(createMappings(classrooms, nextSourceTermId, nextMode));
+        setSelectedRoomIds([]);
         setOverrides([]);
         setPreview(null);
         setPreviewStale(false);
@@ -213,40 +205,42 @@ export default function Promotions() {
         setIdempotencyKey(null);
     };
 
-    const updateMapping = (
-        sourceClassroomId: number,
-        changes: Partial<ClassroomMapping>,
-    ) => {
-        setMappings(current => current.map(mapping =>
-            mapping.sourceClassroomId === sourceClassroomId
-                ? { ...mapping, ...changes }
-                : mapping,
-        ));
+    const updateMapping = (sourceClassroomId: number, changes: Partial<ClassroomMapping>) => {
+        setMappings((current) =>
+            current.map((mapping) =>
+                mapping.sourceClassroomId === sourceClassroomId ? { ...mapping, ...changes } : mapping,
+            ),
+        );
         markChanged();
     };
 
     const buildPayload = () => ({
         sourceTermId: Number(sourceTermId),
         targetTermId: Number(targetTermId),
-        classroomMappings: mappings.map(mapping => (
-            mode === 'TERM_ROLLOVER'
-                ? {
-                    sourceClassroomId: mapping.sourceClassroomId,
-                    targetName: mapping.targetName.trim() || undefined,
-                }
-                : {
-                    sourceClassroomId: mapping.sourceClassroomId,
-                    targetName: mapping.targetName.trim() || undefined,
-                    defaultAction: mapping.defaultAction,
-                }
-        )),
-        studentOverrides: overrides.map(override => ({
-            ...override,
-            targetSourceClassroomId:
-                override.action === 'MOVE' || override.action === 'REPEAT'
-                    ? override.targetSourceClassroomId
-                    : undefined,
-        })),
+        selectedClassroomIds: selectedRoomIds,
+        classroomMappings: mappings
+            .filter((mapping) => selectedRoomIds.includes(mapping.sourceClassroomId))
+            .map((mapping) =>
+                mode === 'TERM_ROLLOVER'
+                    ? {
+                          sourceClassroomId: mapping.sourceClassroomId,
+                          targetName: mapping.targetName.trim() || undefined,
+                      }
+                    : {
+                          sourceClassroomId: mapping.sourceClassroomId,
+                          targetName: mapping.targetName.trim() || undefined,
+                          defaultAction: 'SKIP' as PromotionAction,
+                      },
+            ),
+        studentOverrides: overrides
+            .filter((override) => override.action !== 'SKIP')
+            .map((override) => ({
+                ...override,
+                targetSourceClassroomId:
+                    override.action === 'MOVE' || override.action === 'REPEAT'
+                        ? override.targetSourceClassroomId
+                        : undefined,
+            })),
     });
 
     const handlePreview = async () => {
@@ -258,6 +252,10 @@ export default function Promotions() {
             toast.error('ภาคเรียนต้นทางและปลายทางต้องไม่ซ้ำกัน');
             return;
         }
+        if (selectedRoomIds.length === 0) {
+            toast.error('กรุณาเลือกห้องเรียนที่จะดำเนินการอย่างน้อย 1 ห้อง');
+            return;
+        }
         if (mappings.length === 0) {
             toast.error('ไม่พบห้องเรียนในภาคเรียนต้นทาง');
             return;
@@ -265,10 +263,7 @@ export default function Promotions() {
 
         setPreviewing(true);
         try {
-            const response = await api.post<PreviewResult>(
-                modeConfig[mode].previewPath,
-                buildPayload(),
-            );
+            const response = await api.post<PreviewResult>(modeConfig[mode].previewPath, buildPayload());
             setPreview(response.data);
             setPreviewStale(false);
             setIdempotencyKey(createIdempotencyKey());
@@ -285,25 +280,20 @@ export default function Promotions() {
     };
 
     const getStudentOverride = (student: PreviewStudent) =>
-        overrides.find(item => item.studentId === student.studentId);
+        overrides.find((item) => item.studentId === student.studentId);
 
-    const updateStudent = (
-        student: PreviewStudent,
-        changes: Partial<StudentOverride>,
-    ) => {
-        setOverrides(current => {
-            const existing = current.find(item => item.studentId === student.studentId);
+    const updateStudent = (student: PreviewStudent, changes: Partial<StudentOverride>) => {
+        setOverrides((current) => {
+            const existing = current.find((item) => item.studentId === student.studentId);
             const next: StudentOverride = {
                 studentId: student.studentId,
                 action: existing?.action ?? student.action,
                 targetSourceClassroomId:
-                    existing?.targetSourceClassroomId
-                    ?? student.targetSourceClassroomId
-                    ?? student.sourceClassroomId,
+                    existing?.targetSourceClassroomId ?? student.targetSourceClassroomId ?? student.sourceClassroomId,
                 ...changes,
             };
             return existing
-                ? current.map(item => item.studentId === student.studentId ? next : item)
+                ? current.map((item) => (item.studentId === student.studentId ? next : item))
                 : [...current, next];
         });
         markChanged();
@@ -312,8 +302,12 @@ export default function Promotions() {
     const handleApply = async () => {
         if (!preview || previewStale || preview.issues.length > 0 || !idempotencyKey) return;
 
-        const sourceTerm = terms.find(term => term.id === sourceTermId);
-        const targetTerm = terms.find(term => term.id === targetTermId);
+        const sourceTerm = terms.find((term) => term.id === sourceTermId);
+        const targetTerm = terms.find((term) => term.id === targetTermId);
+        const completesSourceTerm =
+            selectedRoomIds.length === sourceRooms.length &&
+            preview.students.length > 0 &&
+            preview.students.every((student) => (getStudentOverride(student)?.action ?? student.action) !== 'SKIP');
         const confirmation = await Swal.fire({
             title: `ยืนยัน${modeConfig[mode].title}?`,
             html: `
@@ -321,7 +315,11 @@ export default function Promotions() {
                     <p><b>จาก:</b> ${sourceTerm?.term}/${sourceTerm?.year}</p>
                     <p><b>ไป:</b> ${targetTerm?.term}/${targetTerm?.year}</p>
                     <p><b>นักเรียน:</b> ${preview.summary.students ?? 0} คน</p>
-                    <p style="color:#b91c1c;margin-top:8px">ระบบจะบันทึกผลและเปิดใช้ภาคเรียนปลายทาง</p>
+                    <p style="color:#b91c1c;margin-top:8px">${
+                        completesSourceTerm
+                            ? 'ระบบจะบันทึกผลและเปิดใช้ภาคเรียนปลายทาง'
+                            : 'ระบบจะบันทึกเฉพาะรายการที่เลือก และยังไม่เปลี่ยนภาคเรียนที่กำลังใช้งาน'
+                    }</p>
                 </div>
             `,
             icon: 'warning',
@@ -339,7 +337,7 @@ export default function Promotions() {
             await api.post(modeConfig[mode].applyPath, {
                 ...buildPayload(),
                 idempotencyKey,
-                activateTargetTerm: true,
+                activateTargetTerm: completesSourceTerm,
             });
             toast.success(`${modeConfig[mode].title}สำเร็จ`, { id: toastId });
             const [termsResponse, classroomsResponse] = await Promise.all([
@@ -348,10 +346,11 @@ export default function Promotions() {
             ]);
             setTerms(termsResponse.data);
             setClassrooms(classroomsResponse.data);
-            const nextSourceTermId = Number(targetTermId);
+            const nextSourceTermId = completesSourceTerm ? Number(targetTermId) : Number(sourceTermId);
             setSourceTermId(nextSourceTermId);
-            setTargetTermId('');
+            setTargetTermId(completesSourceTerm ? '' : targetTermId);
             setMappings(createMappings(classroomsResponse.data, nextSourceTermId, mode));
+            setSelectedRoomIds([]);
             setPreview(null);
             setOverrides([]);
             setIdempotencyKey(null);
@@ -390,8 +389,8 @@ export default function Promotions() {
 
             <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
                 <StepTitle number="1" title="เลือกรูปแบบและภาคเรียน" />
-                <div className="mt-5 grid gap-3 md:grid-cols-2">
-                    {(Object.keys(modeConfig) as PromotionMode[]).map(item => (
+                <div className="mt-5 grid gap-3 md:grid-cols-3">
+                    {(Object.keys(modeConfig) as PromotionMode[]).map((item) => (
                         <button
                             key={item}
                             type="button"
@@ -403,11 +402,19 @@ export default function Promotions() {
                             }`}
                         >
                             <p className="font-black text-slate-900">{modeConfig[item].title}</p>
-                            <p className="mt-1 text-sm leading-6 text-slate-500">
-                                {modeConfig[item].description}
-                            </p>
+                            <p className="mt-1 text-sm leading-6 text-slate-500">{modeConfig[item].description}</p>
                         </button>
                     ))}
+                    <button
+                        type="button"
+                        onClick={() => navigate('/student-enrollment-changes')}
+                        className="rounded-2xl border border-slate-200 p-4 text-left transition hover:border-green-300"
+                    >
+                        <p className="font-black text-slate-900">นักเรียนย้ายออก/พักการเรียน</p>
+                        <p className="mt-1 text-sm leading-6 text-slate-500">
+                            ย้ายออก พักการเรียน หรือรับนักเรียนกลับเข้าศึกษา โดยไม่เปลี่ยนภาคเรียน
+                        </p>
+                    </button>
                 </div>
 
                 <div className="mt-5 grid items-end gap-4 md:grid-cols-[1fr_auto_1fr]">
@@ -415,7 +422,7 @@ export default function Promotions() {
                         label="ภาคเรียนต้นทาง"
                         value={sourceTermId}
                         terms={terms}
-                        onChange={value => {
+                        onChange={(value) => {
                             setSourceTermId(value);
                             setTargetTermId('');
                             resetPlan(mode, value);
@@ -425,8 +432,8 @@ export default function Promotions() {
                     <TermSelect
                         label="ภาคเรียนปลายทาง"
                         value={targetTermId}
-                        terms={terms.filter(term => term.id !== sourceTermId)}
-                        onChange={value => {
+                        terms={terms.filter((term) => term.id !== sourceTermId)}
+                        onChange={(value) => {
                             setTargetTermId(value);
                             markChanged();
                         }}
@@ -435,10 +442,7 @@ export default function Promotions() {
             </section>
 
             <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-                <StepTitle
-                    number="2"
-                    title={mode === 'TERM_ROLLOVER' ? 'ตรวจชื่อห้องปลายทาง' : 'กำหนดผลลัพธ์ของแต่ละห้อง'}
-                />
+                <StepTitle number="2" title="เลือกห้องที่จะดำเนินการและกำหนดห้องปลายทาง" />
                 {sourceRooms.length === 0 ? (
                     <p className="mt-5 rounded-2xl bg-slate-50 p-5 text-sm text-slate-500">
                         เลือกภาคเรียนต้นทางที่มีห้องเรียนก่อน
@@ -448,47 +452,83 @@ export default function Promotions() {
                         <table className="w-full min-w-[720px] text-sm">
                             <thead>
                                 <tr className="border-b text-left text-slate-500">
+                                    <th className="w-12 px-3 py-3">
+                                        <input
+                                            type="checkbox"
+                                            aria-label="เลือกห้องทั้งหมด"
+                                            checked={mappings.length > 0 && selectedRoomIds.length === mappings.length}
+                                            onChange={(event) => {
+                                                setSelectedRoomIds(
+                                                    event.target.checked
+                                                        ? mappings.map((mapping) => mapping.sourceClassroomId)
+                                                        : [],
+                                                );
+                                                if (!event.target.checked) setOverrides([]);
+                                                markChanged();
+                                            }}
+                                            className="h-4 w-4 accent-primary"
+                                        />
+                                    </th>
                                     <th className="px-3 py-3">ห้องต้นทาง</th>
-                                    {mode === 'ANNUAL_PROMOTION' && <th className="px-3 py-3">ผลลัพธ์หลัก</th>}
                                     <th className="px-3 py-3">ชื่อห้องปลายทาง</th>
                                 </tr>
                             </thead>
                             <tbody>
-                                {mappings.map(mapping => {
-                                    const room = sourceRooms.find(item => item.id === mapping.sourceClassroomId);
+                                {mappings.map((mapping) => {
+                                    const room = sourceRooms.find((item) => item.id === mapping.sourceClassroomId);
+                                    const selected = selectedRoomIds.includes(mapping.sourceClassroomId);
                                     return (
-                                        <tr key={mapping.sourceClassroomId} className="border-b last:border-0">
+                                        <tr
+                                            key={mapping.sourceClassroomId}
+                                            className={`border-b last:border-0 ${selected ? 'bg-green-50/40' : ''}`}
+                                        >
+                                            <td className="px-3 py-3">
+                                                <input
+                                                    type="checkbox"
+                                                    aria-label={`เลือกห้อง ${room?.name ?? mapping.sourceClassroomId}`}
+                                                    checked={selected}
+                                                    onChange={(event) => {
+                                                        const checked = event.target.checked;
+                                                        setSelectedRoomIds((current) =>
+                                                            event.target.checked
+                                                                ? [...current, mapping.sourceClassroomId]
+                                                                : current.filter(
+                                                                      (id) => id !== mapping.sourceClassroomId,
+                                                                  ),
+                                                        );
+                                                        if (!checked && preview) {
+                                                            const studentIds = new Set(
+                                                                preview.students
+                                                                    .filter(
+                                                                        (student) =>
+                                                                            student.sourceClassroomId ===
+                                                                            mapping.sourceClassroomId,
+                                                                    )
+                                                                    .map((student) => student.studentId),
+                                                            );
+                                                            setOverrides((current) =>
+                                                                current.filter(
+                                                                    (item) => !studentIds.has(item.studentId),
+                                                                ),
+                                                            );
+                                                        }
+                                                        markChanged();
+                                                    }}
+                                                    className="h-4 w-4 accent-primary"
+                                                />
+                                            </td>
                                             <td className="px-3 py-3 font-bold text-slate-800">{room?.name}</td>
-                                            {mode === 'ANNUAL_PROMOTION' && (
-                                                <td className="px-3 py-3">
-                                                    <select
-                                                        value={mapping.defaultAction}
-                                                        onChange={event => updateMapping(
-                                                            mapping.sourceClassroomId,
-                                                            { defaultAction: event.target.value as PromotionAction },
-                                                        )}
-                                                        className="w-full rounded-xl border border-slate-200 px-3 py-2"
-                                                    >
-                                                        {(['MOVE', 'GRADUATE', 'TRANSFER_OUT', 'SKIP'] as PromotionAction[])
-                                                            .map(action => (
-                                                                <option key={action} value={action}>{ACTION_LABELS[action]}</option>
-                                                            ))}
-                                                    </select>
-                                                </td>
-                                            )}
                                             <td className="px-3 py-3">
                                                 <input
                                                     value={mapping.targetName}
-                                                    onChange={event => updateMapping(
-                                                        mapping.sourceClassroomId,
-                                                        { targetName: event.target.value },
-                                                    )}
-                                                    placeholder={
-                                                        mapping.defaultAction === 'MOVE'
-                                                            ? 'เช่น ม.2/1'
-                                                            : 'เว้นว่างได้ หรือระบุเมื่อมีข้อยกเว้นย้ายเข้าห้องนี้'
+                                                    disabled={!selected}
+                                                    onChange={(event) =>
+                                                        updateMapping(mapping.sourceClassroomId, {
+                                                            targetName: event.target.value,
+                                                        })
                                                     }
-                                                    className="w-full rounded-xl border border-slate-200 px-3 py-2"
+                                                    placeholder={mode === 'TERM_ROLLOVER' ? room?.name : 'เช่น ม.2/1'}
+                                                    className="w-full rounded-xl border border-slate-200 px-3 py-2 disabled:bg-slate-100"
                                                 />
                                             </td>
                                         </tr>
@@ -502,7 +542,7 @@ export default function Promotions() {
                     <button
                         type="button"
                         onClick={handlePreview}
-                        disabled={previewing || sourceRooms.length === 0}
+                        disabled={previewing || sourceRooms.length === 0 || selectedRoomIds.length === 0}
                         className="flex items-center gap-2 rounded-xl bg-primary px-5 py-3 font-bold text-white transition hover:bg-green-800 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                         {previewing ? <Loader2 className="animate-spin" size={18} /> : <RefreshCw size={18} />}
@@ -514,11 +554,19 @@ export default function Promotions() {
             {preview && (
                 <>
                     <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-                        <StepTitle number="3" title="ตรวจผลลัพธ์และตั้งข้อยกเว้นรายคน" />
+                        <StepTitle number="3" title="เลือกนักเรียนและกำหนดการดำเนินการรายบุคคล" />
                         <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                             <SummaryCard icon={Users} label="นักเรียนทั้งหมด" value={preview.summary.students ?? 0} />
-                            <SummaryCard icon={ArrowRight} label="ย้ายห้อง" value={preview.summary.studentsToMove ?? 0} />
-                            <SummaryCard icon={GraduationCap} label="จบการศึกษา" value={preview.summary.studentsToGraduate ?? 0} />
+                            <SummaryCard
+                                icon={ArrowRight}
+                                label="ย้ายห้อง"
+                                value={preview.summary.studentsToMove ?? 0}
+                            />
+                            <SummaryCard
+                                icon={GraduationCap}
+                                label="จบการศึกษา"
+                                value={preview.summary.studentsToGraduate ?? 0}
+                            />
                             <SummaryCard
                                 icon={AlertTriangle}
                                 label="รายการที่ต้องแก้"
@@ -557,7 +605,7 @@ export default function Promotions() {
                             <Search className="absolute left-3 top-3 text-slate-400" size={18} />
                             <input
                                 value={search}
-                                onChange={event => setSearch(event.target.value)}
+                                onChange={(event) => setSearch(event.target.value)}
                                 placeholder="ค้นหาชื่อหรือลขประจำตัวประชาชน"
                                 className="w-full rounded-xl border border-slate-200 py-2.5 pl-10 pr-4"
                             />
@@ -567,6 +615,43 @@ export default function Promotions() {
                             <table className="w-full min-w-[900px] text-sm">
                                 <thead className="sticky top-0 bg-slate-50 text-left text-slate-500">
                                     <tr>
+                                        <th className="w-12 px-4 py-3">
+                                            <input
+                                                type="checkbox"
+                                                aria-label="เลือกนักเรียนทั้งหมด"
+                                                checked={
+                                                    filteredStudents.length > 0 &&
+                                                    filteredStudents.every(
+                                                        (student) =>
+                                                            (getStudentOverride(student)?.action ?? student.action) !==
+                                                            'SKIP',
+                                                    )
+                                                }
+                                                onChange={(event) => {
+                                                    const visibleIds = new Set(
+                                                        filteredStudents.map((student) => student.studentId),
+                                                    );
+                                                    setOverrides((current) => {
+                                                        const untouched = current.filter(
+                                                            (item) => !visibleIds.has(item.studentId),
+                                                        );
+                                                        if (!event.target.checked) return untouched;
+                                                        return [
+                                                            ...untouched,
+                                                            ...filteredStudents.map((student) => ({
+                                                                studentId: student.studentId,
+                                                                action: 'MOVE' as PromotionAction,
+                                                                targetSourceClassroomId:
+                                                                    student.targetSourceClassroomId ??
+                                                                    student.sourceClassroomId,
+                                                            })),
+                                                        ];
+                                                    });
+                                                    markChanged();
+                                                }}
+                                                className="h-4 w-4 accent-primary"
+                                            />
+                                        </th>
                                         <th className="px-4 py-3">นักเรียน</th>
                                         <th className="px-4 py-3">ห้องเดิม</th>
                                         <th className="px-4 py-3">ผลลัพธ์</th>
@@ -574,16 +659,30 @@ export default function Promotions() {
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {filteredStudents.map(student => {
+                                    {filteredStudents.map((student) => {
                                         const override = getStudentOverride(student);
                                         const action = override?.action ?? student.action;
                                         const targetRoomId =
-                                            override?.targetSourceClassroomId
-                                            ?? student.targetSourceClassroomId
-                                            ?? student.sourceClassroomId;
+                                            override?.targetSourceClassroomId ??
+                                            student.targetSourceClassroomId ??
+                                            student.sourceClassroomId;
                                         const needsTarget = action === 'MOVE' || action === 'REPEAT';
+                                        const selected = action !== 'SKIP';
                                         return (
                                             <tr key={student.studentId} className="border-t">
+                                                <td className="px-4 py-3">
+                                                    <input
+                                                        type="checkbox"
+                                                        aria-label={`เลือก ${student.firstName} ${student.lastName}`}
+                                                        checked={selected}
+                                                        onChange={(event) =>
+                                                            updateStudent(student, {
+                                                                action: event.target.checked ? 'MOVE' : 'SKIP',
+                                                            })
+                                                        }
+                                                        className="h-4 w-4 accent-primary"
+                                                    />
+                                                </td>
                                                 <td className="px-4 py-3">
                                                     <p className="font-bold text-slate-800">
                                                         {student.firstName} {student.lastName}
@@ -591,20 +690,24 @@ export default function Promotions() {
                                                     <p className="text-xs text-slate-400">{student.citizenId}</p>
                                                 </td>
                                                 <td className="px-4 py-3">
-                                                    {sourceRooms.find(room => room.id === student.sourceClassroomId)?.name ?? '-'}
+                                                    {sourceRooms.find((room) => room.id === student.sourceClassroomId)
+                                                        ?.name ?? '-'}
                                                 </td>
                                                 <td className="px-4 py-3">
                                                     <select
                                                         value={action}
-                                                        onChange={event => updateStudent(student, {
-                                                            action: event.target.value as PromotionAction,
-                                                        })}
-                                                        className="w-full rounded-xl border border-slate-200 px-3 py-2"
+                                                        disabled={!selected}
+                                                        onChange={(event) =>
+                                                            updateStudent(student, {
+                                                                action: event.target.value as PromotionAction,
+                                                            })
+                                                        }
+                                                        className="w-full rounded-xl border border-slate-200 px-3 py-2 disabled:bg-slate-100"
                                                     >
                                                         {(mode === 'TERM_ROLLOVER'
-                                                            ? ['MOVE', 'TRANSFER_OUT', 'SKIP']
-                                                            : ['MOVE', 'REPEAT', 'GRADUATE', 'TRANSFER_OUT', 'SKIP']
-                                                        ).map(item => (
+                                                            ? ['MOVE', 'TRANSFER_OUT']
+                                                            : ['MOVE', 'REPEAT', 'GRADUATE', 'TRANSFER_OUT']
+                                                        ).map((item) => (
                                                             <option key={item} value={item}>
                                                                 {ACTION_LABELS[item as PromotionAction]}
                                                             </option>
@@ -615,14 +718,16 @@ export default function Promotions() {
                                                     <select
                                                         value={targetRoomId}
                                                         disabled={!needsTarget}
-                                                        onChange={event => updateStudent(student, {
-                                                            targetSourceClassroomId: Number(event.target.value),
-                                                        })}
+                                                        onChange={(event) =>
+                                                            updateStudent(student, {
+                                                                targetSourceClassroomId: Number(event.target.value),
+                                                            })
+                                                        }
                                                         className="w-full rounded-xl border border-slate-200 px-3 py-2 disabled:bg-slate-100"
                                                     >
                                                         {mappings
-                                                            .filter(mapping => mapping.targetName.trim())
-                                                            .map(mapping => (
+                                                            .filter((mapping) => mapping.targetName.trim())
+                                                            .map((mapping) => (
                                                                 <option
                                                                     key={mapping.sourceClassroomId}
                                                                     value={mapping.sourceClassroomId}
@@ -656,16 +761,17 @@ export default function Promotions() {
                                 type="button"
                                 onClick={handleApply}
                                 disabled={
-                                    applying
-                                    || previewStale
-                                    || preview.issues.length > 0
-                                    || !idempotencyKey
+                                    applying ||
+                                    previewStale ||
+                                    preview.issues.length > 0 ||
+                                    !idempotencyKey ||
+                                    !preview.students.some(
+                                        (student) => (getStudentOverride(student)?.action ?? student.action) !== 'SKIP',
+                                    )
                                 }
                                 className="flex shrink-0 items-center justify-center gap-2 rounded-xl bg-primary px-6 py-3 font-black text-white hover:bg-green-800 disabled:cursor-not-allowed disabled:opacity-40"
                             >
-                                {applying
-                                    ? <Loader2 className="animate-spin" size={18} />
-                                    : <CheckCircle2 size={18} />}
+                                {applying ? <Loader2 className="animate-spin" size={18} /> : <CheckCircle2 size={18} />}
                                 ยืนยัน{modeConfig[mode].title}
                             </button>
                         </div>
@@ -703,16 +809,17 @@ function TermSelect({
             <span className="mb-2 block text-sm font-bold text-slate-700">{label}</span>
             <select
                 value={value}
-                onChange={event => onChange(event.target.value ? Number(event.target.value) : '')}
+                onChange={(event) => onChange(event.target.value ? Number(event.target.value) : '')}
                 className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3"
             >
                 <option value="">เลือกภาคเรียน</option>
                 {terms
                     .slice()
                     .sort((a, b) => b.year - a.year || b.term - a.term)
-                    .map(term => (
+                    .map((term) => (
                         <option key={term.id} value={term.id}>
-                            {term.term}/{term.year}{term.isActive ? ' (กำลังใช้งาน)' : ''}
+                            {term.term}/{term.year}
+                            {term.isActive ? ' (กำลังใช้งาน)' : ''}
                         </option>
                     ))}
             </select>
