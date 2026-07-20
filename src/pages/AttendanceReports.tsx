@@ -392,7 +392,7 @@ export default function AttendanceReports() {
 
             if (record.status === 'ABSENT') groups.absent.add(studentId);
             if (record.status === 'LEAVE') groups.leave.add(studentId);
-            if (['PRESENT', 'LATE', 'ACTIVITY'].includes(record.status)) {
+            if (['PRESENT', 'LATE'].includes(record.status)) {
                 if (record.type === 'ASSEMBLY') groups.assembly.add(studentId);
                 if (record.type === 'AREA') groups.area.add(studentId);
             }
@@ -417,7 +417,7 @@ export default function AttendanceReports() {
             showZeroAsDash = false
         ): (string | number)[] => {
             const absentOrLeaveCount = groups.absent.size + groups.leave.size;
-            const attendedCount = groups.area.size + groups.assembly.size;
+            const attendedCount = new Set([...groups.area, ...groups.assembly]).size;
             const displayCount = (value: number) => showZeroAsDash && value === 0 ? '-' : value;
             return [
                 label,
