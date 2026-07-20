@@ -4,7 +4,7 @@ import {
     CheckCircle, XCircle, Clock, Info, AlertTriangle, ChevronLeft, ChevronRight, Activity, FileDown
 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import * as XLSX from 'xlsx';
+import * as XLSX from 'xlsx-js-style';
 import api from '../services/api';
 import {
     BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer
@@ -44,6 +44,13 @@ interface AttendanceRecord {
     };
 }
 
+interface AttendanceStudent {
+    id: string;
+    citizenId: string;
+    firstName: string;
+    lastName: string;
+}
+
 interface SummaryStatistics {
     totalStudents: number;
     totalChecked: number;
@@ -69,6 +76,18 @@ interface SummaryData {
     classroomName: string;
     statistics: SummaryStatistics;
     percentages: SummaryPercentage;
+}
+
+interface DailyStudentGroups {
+    absent: Set<string>;
+    leave: Set<string>;
+    assembly: Set<string>;
+    area: Set<string>;
+}
+
+interface DailyClassroomStatistics {
+    classroomName: string;
+    totalStudents: number;
 }
 
 const ITEMS_PER_PAGE = 10;
@@ -115,20 +134,75 @@ const formatDateTime = (date: string) =>
         minute: '2-digit'
     });
 
-const getStatusLabel = (status: string) => {
+const getClassroomExportStatusLabel = (status: AttendanceRecord['status']) => {
     switch (status) {
-        case 'PRESENT': return 'มาเรียน';
+        case 'PRESENT': return 'มา';
         case 'ABSENT': return 'ขาด';
         case 'LATE': return 'สาย';
         case 'LEAVE': return 'ลา';
         case 'ACTIVITY': return 'กิจกรรม';
-        default: return status;
     }
 };
 
-const getTypeLabel = (type: string) => type === 'ASSEMBLY' ? 'เข้าแถวหน้าเสาธง' : 'เวรเขตพื้นที่';
+const getClassroomExportTypeLabel = (type: AttendanceRecord['type']) =>
+    type === 'ASSEMBLY' ? 'เข้าแถว' : 'เขตพื้นที่';
 
-const safeSheetName = (name: string) => name.replace(/[\\/?*[\]:]/g, '').slice(0, 31) || 'Attendance';
+const getGradeLevel = (classroomName: string) => {
+    const thaiDigits: Record<string, string> = {
+        '๐': '0', '๑': '1', '๒': '2', '๓': '3', '๔': '4',
+        '๕': '5', '๖': '6', '๗': '7', '๘': '8', '๙': '9'
+    };
+    const normalizedName = classroomName
+        .replace(/[๐-๙]/g, digit => thaiDigits[digit])
+        .replace(/\s+/g, '')
+        .toLowerCase();
+    const secondaryMatch = normalizedName.match(/(?:มัธยมศึกษาปีที่|มัธยม|ม\.?|m\.?)([1-6])(?:\/|\-|ห้อง|$)/);
+    if (secondaryMatch) {
+        return { key: `ม.${secondaryMatch[1]}`, order: 100 + Number(secondaryMatch[1]) };
+    }
+
+    const primaryMatch = normalizedName.match(/(?:ประถมศึกษาปีที่|ประถม|ป\.?|p\.?)([1-6])(?:\/|\-|ห้อง|$)/);
+    if (primaryMatch) {
+        return { key: `ป.${primaryMatch[1]}`, order: 50 + Number(primaryMatch[1]) };
+    }
+
+    const kindergartenMatch = normalizedName.match(/(?:อนุบาล|อ\.?)([1-3])(?:\/|\-|$)/);
+    if (kindergartenMatch) {
+        return { key: `อ.${kindergartenMatch[1]}`, order: Number(kindergartenMatch[1]) };
+    }
+
+    // หากชื่อห้องเป็นเพียง 1/1, 2/3 หรือ "ห้อง1/1" ให้ถือว่าเลขหน้าคือระดับมัธยม
+    const leadingLevelMatch = normalizedName.match(/(?:^|ห้อง)([1-6])(?:\/|\-)\d+/);
+    if (leadingLevelMatch) {
+        return { key: `ม.${leadingLevelMatch[1]}`, order: 100 + Number(leadingLevelMatch[1]) };
+    }
+
+    // รูปแบบอื่นที่ยังมีเลขระดับอยู่หน้าหมายเลขห้อง เช่น "ระดับชั้น1/2"
+    const levelBeforeRoomMatch = normalizedName.match(/(?:ระดับชั้น|ชั้น)([1-6])(?:\/|\-)\d+/);
+    if (levelBeforeRoomMatch) {
+        return { key: `ม.${levelBeforeRoomMatch[1]}`, order: 100 + Number(levelBeforeRoomMatch[1]) };
+    }
+
+    return { key: 'อื่น ๆ', order: 999 };
+};
+
+const createEmptyDailyStudentGroups = (): DailyStudentGroups => ({
+    absent: new Set<string>(),
+    leave: new Set<string>(),
+    assembly: new Set<string>(),
+    area: new Set<string>()
+});
+
+const getPercentage = (value: number, total: number) =>
+    total > 0 ? Number(((value / total) * 100).toFixed(2)) : 0;
+
+const mergeStudentGroups = (target: DailyStudentGroups, source: DailyStudentGroups) => {
+    source.absent.forEach(studentId => target.absent.add(studentId));
+    source.leave.forEach(studentId => target.leave.add(studentId));
+    source.assembly.forEach(studentId => target.assembly.add(studentId));
+    source.area.forEach(studentId => target.area.add(studentId));
+    return target;
+};
 
 const parseAttendanceRecords = (data: any): AttendanceRecord[] => {
     if (Array.isArray(data)) return data;
@@ -259,63 +333,288 @@ export default function AttendanceReports() {
         ยังไม่เช็ค: s.statistics.notChecked,
     }));
 
-    const exportAttendanceWorkbook = (
+    const exportDailyStatisticsWorkbook = (
         records: AttendanceRecord[],
-        summaryRows: (string | number)[][],
-        fileName: string,
-        sheetName: string
+        classroomSummaries: SummaryData[],
+        reportDate: string
     ) => {
-        if (records.length === 0) {
+        const classroomStatistics = new Map<string, DailyClassroomStatistics>();
+        classroomSummaries.forEach(summary => {
+            classroomStatistics.set(summary.classroomName, {
+                classroomName: summary.classroomName,
+                totalStudents: summary.statistics.totalStudents
+            });
+        });
+
+        const studentIdsByClassroom = new Map<string, Set<string>>();
+        records.forEach(record => {
+            const classroomName = record.student.classroom?.name ?? '';
+            if (!classroomName) return;
+
+            const studentIds = studentIdsByClassroom.get(classroomName) ?? new Set<string>();
+            studentIds.add(record.student.citizenId);
+            studentIdsByClassroom.set(classroomName, studentIds);
+
+            if (!classroomStatistics.has(classroomName)) {
+                classroomStatistics.set(classroomName, {
+                    classroomName,
+                    totalStudents: 0
+                });
+            }
+        });
+        studentIdsByClassroom.forEach((studentIds, classroomName) => {
+            const classroom = classroomStatistics.get(classroomName);
+            if (classroom && classroom.totalStudents === 0) {
+                classroom.totalStudents = studentIds.size;
+            }
+        });
+
+        if (classroomStatistics.size === 0) {
             toast.error('ไม่มีข้อมูลสำหรับส่งออก');
             return;
         }
 
-        const rows = records
+        const latestRecordByStudentAndType = new Map<string, AttendanceRecord>();
+        records
             .slice()
             .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
-            .map((record, index) => ({
-                ลำดับ: index + 1,
-                'วันที่/เวลา': formatDateTime(record.date),
-                'วันที่': new Date(record.date).toLocaleDateString('th-TH'),
-                'เวลา': `${new Date(record.date).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })} น.`,
-                'ประเภท': getTypeLabel(record.type),
-                'รหัสนักเรียน': record.student.citizenId,
-                'ชื่อ': record.student.firstName,
-                'นามสกุล': record.student.lastName,
-                'ชื่อ-นามสกุล': `${record.student.firstName} ${record.student.lastName}`,
-                'ห้องเรียน': record.student.classroom?.name ?? '',
-                'สถานะ': getStatusLabel(record.status),
-                'ผู้บันทึก': `${record.recorder?.firstName ?? ''} ${record.recorder?.lastName ?? ''}`.trim()
-            }));
+            .forEach(record => {
+                const classroomName = record.student.classroom?.name ?? '';
+                const key = `${classroomName}|${record.student.citizenId}|${record.type}`;
+                latestRecordByStudentAndType.set(key, record);
+            });
 
-        const workbook = XLSX.utils.book_new();
-        const worksheet = XLSX.utils.json_to_sheet(rows);
-        const summarySheet = XLSX.utils.aoa_to_sheet([
-            ['รายงานการเช็คชื่อ'],
-            ['วันที่ส่งออก', formatDateTime(new Date().toISOString())],
-            ...summaryRows,
-            ['จำนวนรายการ', records.length]
-        ]);
+        const studentGroupsByClassroom = new Map<string, DailyStudentGroups>();
+        latestRecordByStudentAndType.forEach(record => {
+            const classroomName = record.student.classroom?.name ?? '';
+            const studentId = record.student.citizenId;
+            const groups = studentGroupsByClassroom.get(classroomName) ?? createEmptyDailyStudentGroups();
 
+            if (record.status === 'ABSENT') groups.absent.add(studentId);
+            if (record.status === 'LEAVE') groups.leave.add(studentId);
+            if (['PRESENT', 'LATE', 'ACTIVITY'].includes(record.status)) {
+                if (record.type === 'ASSEMBLY') groups.assembly.add(studentId);
+                if (record.type === 'AREA') groups.area.add(studentId);
+            }
+            studentGroupsByClassroom.set(classroomName, groups);
+        });
+
+        const gradeLevels = new Map<string, {
+            order: number;
+            classrooms: DailyClassroomStatistics[];
+        }>();
+        Array.from(classroomStatistics.values()).forEach(classroom => {
+            const grade = getGradeLevel(classroom.classroomName);
+            const gradeLevel = gradeLevels.get(grade.key) ?? { order: grade.order, classrooms: [] };
+            gradeLevel.classrooms.push(classroom);
+            gradeLevels.set(grade.key, gradeLevel);
+        });
+
+        const createStatisticsRow = (
+            label: string,
+            totalStudents: number,
+            groups: DailyStudentGroups,
+            showZeroAsDash = false
+        ): (string | number)[] => {
+            const absentOrLeaveCount = groups.absent.size + groups.leave.size;
+            const attendedCount = groups.area.size + groups.assembly.size;
+            const displayCount = (value: number) => showZeroAsDash && value === 0 ? '-' : value;
+            return [
+                label,
+                totalStudents,
+                displayCount(groups.absent.size),
+                displayCount(groups.leave.size),
+                displayCount(absentOrLeaveCount),
+                getPercentage(absentOrLeaveCount, totalStudents),
+                displayCount(groups.area.size),
+                displayCount(groups.assembly.size),
+                displayCount(attendedCount),
+                getPercentage(attendedCount, totalStudents)
+            ];
+        };
+        const sortedGradeLevels = Array.from(gradeLevels.entries())
+            .sort(([, a], [, b]) => a.order - b.order);
+        const reportRows: (string | number)[][] = [];
+        const gradeSummaryRowNumbers: number[] = [];
+
+        sortedGradeLevels.forEach(([gradeName, grade]) => {
+            grade.classrooms
+                .sort((a, b) => a.classroomName.localeCompare(b.classroomName, 'th', { numeric: true }))
+                .forEach(classroom => {
+                    reportRows.push(createStatisticsRow(
+                        classroom.classroomName,
+                        classroom.totalStudents,
+                        studentGroupsByClassroom.get(classroom.classroomName)
+                            ?? createEmptyDailyStudentGroups(),
+                        true
+                    ));
+                });
+
+            const totalStudents = grade.classrooms.reduce(
+                (total, classroom) => total + classroom.totalStudents,
+                0
+            );
+            const groups = grade.classrooms.reduce(
+                (total, classroom) => mergeStudentGroups(
+                    total,
+                    studentGroupsByClassroom.get(classroom.classroomName)
+                        ?? createEmptyDailyStudentGroups()
+                ),
+                createEmptyDailyStudentGroups()
+            );
+            reportRows.push(createStatisticsRow(`รวม ${gradeName}\nทั้งสิ้น`, totalStudents, groups));
+            gradeSummaryRowNumbers.push(4 + reportRows.length);
+        });
+        const totalStudentsInSchool = Array.from(classroomStatistics.values()).reduce(
+            (total, classroom) => total + classroom.totalStudents,
+            0
+        );
+        const schoolGroups = Array.from(studentGroupsByClassroom.values()).reduce(
+            (total, groups) => mergeStudentGroups(total, groups),
+            createEmptyDailyStudentGroups()
+        );
+        reportRows.push(createStatisticsRow(
+            'รวมทั้งหมด',
+            totalStudentsInSchool,
+            schoolGroups
+        ));
+        const schoolSummaryRowNumber = 4 + reportRows.length;
+        const groupHeader = [
+            'ระดับชั้น',
+            'จำนวน\nทั้งหมด',
+            'จำนวนนักเรียนที่ขาด/ลา',
+            '',
+            '',
+            '',
+            'จำนวนนักเรียนเข้าเขตพื้นที่และเข้าแถว',
+            '',
+            '',
+            ''
+        ];
+        const subHeader = [
+            '',
+            '',
+            'จำนวนที่ขาด',
+            'จำนวนที่ลา',
+            'รวม\nขาด ลา',
+            'ขาดลา\nคิดเป็นร้อยละ',
+            'จำนวนเข้าเขตฯ',
+            'จำนวนเข้าแถว',
+            'รวม\nมา',
+            'มา คิด\nเป็นร้อยละ'
+        ];
+        const thaiReportDate = parseIsoDate(reportDate).toLocaleDateString('th-TH', {
+            day: 'numeric',
+            month: 'long',
+            year: 'numeric'
+        });
+        const sheetRows: (string | number)[][] = [
+            [`สรุปการเข้าแถวหน้าเสาธง ประจำวันที่ ${thaiReportDate}`],
+            ['โรงเรียนเทพศิรินทร์พุแค สระบุรี'],
+            groupHeader,
+            subHeader,
+            ...reportRows
+        ];
+        const worksheet = XLSX.utils.aoa_to_sheet(sheetRows);
         worksheet['!cols'] = [
-            { wch: 8 },
-            { wch: 22 },
             { wch: 16 },
             { wch: 12 },
-            { wch: 20 },
-            { wch: 18 },
-            { wch: 18 },
-            { wch: 18 },
-            { wch: 30 },
+            { wch: 11 },
+            { wch: 11 },
+            { wch: 11 },
             { wch: 14 },
             { wch: 14 },
-            { wch: 24 }
+            { wch: 13 },
+            { wch: 11 },
+            { wch: 14 }
         ];
-        summarySheet['!cols'] = [{ wch: 24 }, { wch: 48 }];
+        worksheet['!rows'] = Array.from({ length: sheetRows.length }, (_, index) => ({
+            hpt: index < 2 ? 24 : index < 4 ? 38 : 21
+        }));
+        gradeSummaryRowNumbers.forEach(rowNumber => {
+            worksheet['!rows']![rowNumber - 1] = { hpt: 34 };
+        });
+        worksheet['!merges'] = [
+            XLSX.utils.decode_range('A1:J1'),
+            XLSX.utils.decode_range('A2:J2'),
+            XLSX.utils.decode_range('A3:A4'),
+            XLSX.utils.decode_range('B3:B4'),
+            XLSX.utils.decode_range('C3:F3'),
+            XLSX.utils.decode_range('G3:J3')
+        ];
 
-        XLSX.utils.book_append_sheet(workbook, worksheet, safeSheetName(sheetName));
-        XLSX.utils.book_append_sheet(workbook, summarySheet, 'สรุปเงื่อนไข');
-        XLSX.writeFile(workbook, fileName);
+        const baseFont = { name: 'TH Sarabun New', sz: 16, color: { rgb: '000000' } };
+        const centered = { horizontal: 'center', vertical: 'center', wrapText: true };
+        const thinBorder = {
+            top: { style: 'thin', color: { rgb: 'FFFFFF' } },
+            bottom: { style: 'thin', color: { rgb: 'FFFFFF' } },
+            left: { style: 'thin', color: { rgb: 'FFFFFF' } },
+            right: { style: 'thin', color: { rgb: 'FFFFFF' } }
+        };
+        const applyStyle = (
+            range: string,
+            style: Record<string, unknown>
+        ) => {
+            const decodedRange = XLSX.utils.decode_range(range);
+            for (let row = decodedRange.s.r; row <= decodedRange.e.r; row += 1) {
+                for (let column = decodedRange.s.c; column <= decodedRange.e.c; column += 1) {
+                    const address = XLSX.utils.encode_cell({ r: row, c: column });
+                    if (!worksheet[address]) {
+                        worksheet[address] = { t: 's', v: '' };
+                    }
+                    worksheet[address].s = style;
+                }
+            }
+        };
+        const lastRow = sheetRows.length;
+        applyStyle(`A1:J${lastRow}`, {
+            font: baseFont,
+            alignment: centered
+        });
+        applyStyle('A1:J2', {
+            font: { ...baseFont, bold: true, sz: 18 },
+            alignment: centered
+        });
+        applyStyle('A3:J4', {
+            font: { ...baseFont, bold: true },
+            fill: { patternType: 'solid', fgColor: { rgb: 'D0D0D0' } },
+            alignment: centered,
+            border: thinBorder
+        });
+        gradeSummaryRowNumbers.forEach(rowNumber => {
+            applyStyle(`A${rowNumber}:J${rowNumber}`, {
+                font: { ...baseFont, bold: true },
+                fill: { patternType: 'solid', fgColor: { rgb: 'D0D0D0' } },
+                alignment: centered
+            });
+        });
+        applyStyle(`A${schoolSummaryRowNumber}:J${schoolSummaryRowNumber}`, {
+            font: { ...baseFont, bold: true },
+            alignment: centered,
+            border: {
+                top: { style: 'thin', color: { rgb: '000000' } }
+            }
+        });
+        for (let row = 5; row <= lastRow; row += 1) {
+            const absentPercentageCell = worksheet[`F${row}`];
+            const presentPercentageCell = worksheet[`J${row}`];
+            if (absentPercentageCell) absentPercentageCell.z = '0.##';
+            if (presentPercentageCell) presentPercentageCell.z = '0.##';
+        }
+        worksheet['!margins'] = {
+            left: 0.25,
+            right: 0.25,
+            top: 0.4,
+            bottom: 0.4,
+            header: 0.2,
+            footer: 0.2
+        };
+
+        const workbook = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(workbook, worksheet, 'สถิติประจำวัน');
+        XLSX.writeFile(workbook, `สถิติการเช็คชื่อประจำวัน_${reportDate}.xlsx`, {
+            cellStyles: true
+        });
         toast.success('ส่งออกไฟล์ Excel สำเร็จ');
     };
 
@@ -324,11 +623,15 @@ export default function AttendanceReports() {
         return parseAttendanceRecords(res.data);
     };
 
-    const fetchStudentAttendanceForExport = async (record: AttendanceRecord) => {
-        const termDates = getDateRange(activeTerm?.startDate, activeTerm?.endDate);
+    const fetchClassroomAttendanceForExport = async (classroomId: number) => {
+        const today = getTodayString();
+        const termEndDate = activeTerm?.endDate && dateOnly(activeTerm.endDate) < today
+            ? activeTerm.endDate
+            : today;
+        const termDates = getDateRange(activeTerm?.startDate, termEndDate);
+
         if (!activeTerm?.id || termDates.length === 0) {
-            toast.error('ไม่พบช่วงวันที่ของภาคเรียนปัจจุบัน');
-            return [];
+            throw new Error('ไม่พบช่วงวันที่ของภาคเรียนปัจจุบัน');
         }
 
         const records: AttendanceRecord[] = [];
@@ -340,105 +643,152 @@ export default function AttendanceReports() {
                 const params = new URLSearchParams();
                 params.append('termId', String(activeTerm.id));
                 params.append('date', date);
-                if (record.student.id) params.append('studentId', record.student.id);
-                params.append('citizenId', record.student.citizenId);
+                params.append('classroomId', String(classroomId));
 
-                try {
-                    const res = await api.get(`/attendance/history/daily?${params.toString()}`);
-                    return parseAttendanceRecords(res.data);
-                } catch (error) {
-                    return [];
-                }
+                return fetchAttendanceForExport(params);
             }));
 
             records.push(...batchResults.flat());
         }
 
-        const uniqueRecords = new Map<string, AttendanceRecord>();
-        records
-            .filter(item => item.student.citizenId === record.student.citizenId)
-            .forEach(item => uniqueRecords.set(item.id, item));
-
-        return Array.from(uniqueRecords.values());
+        return records;
     };
 
-    const handleExportSchoolDaily = async () => {
+    const exportClassroomAttendanceWorkbook = (
+        students: AttendanceStudent[],
+        records: AttendanceRecord[],
+        classroomName: string
+    ) => {
+        if (students.length === 0 && records.length === 0) {
+            toast.error('ไม่มีข้อมูลสำหรับส่งออก');
+            return;
+        }
+
+        const studentsByCitizenId = new Map<string, AttendanceStudent>();
+        students.forEach(student => studentsByCitizenId.set(student.citizenId, student));
+        records.forEach(record => {
+            if (!studentsByCitizenId.has(record.student.citizenId)) {
+                studentsByCitizenId.set(record.student.citizenId, {
+                    id: record.student.id ?? record.student.citizenId,
+                    citizenId: record.student.citizenId,
+                    firstName: record.student.firstName,
+                    lastName: record.student.lastName
+                });
+            }
+        });
+
+        const sortedStudents = Array.from(studentsByCitizenId.values()).sort((a, b) =>
+            a.citizenId.localeCompare(b.citizenId, 'th', { numeric: true })
+        );
+        const attendanceTypes: AttendanceRecord['type'][] = ['ASSEMBLY', 'AREA'];
+        const statusByStudentTypeAndDate = new Map<string, string>();
+
+        records
+            .slice()
+            .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+            .forEach(record => {
+                const key = `${record.student.citizenId}|${record.type}|${dateOnly(record.date)}`;
+                statusByStudentTypeAndDate.set(key, getClassroomExportStatusLabel(record.status));
+            });
+
+        const workbook = XLSX.utils.book_new();
+        const checkedDateCountByType = new Map<AttendanceRecord['type'], number>();
+
+        attendanceTypes.forEach(type => {
+            const checkedDates = Array.from(new Set(
+                records
+                    .filter(record => record.type === type)
+                    .map(record => dateOnly(record.date))
+            )).sort();
+            const header = [
+                'ลำดับ',
+                'รหัสนักเรียน',
+                'ชื่อ',
+                'นามสกุล',
+                'ห้องเรียน',
+                'ประเภท',
+                ...checkedDates.map(date => parseIsoDate(date).toLocaleDateString('th-TH'))
+            ];
+            const rows: (string | number)[][] = sortedStudents.map((student, index) => [
+                index + 1,
+                student.citizenId,
+                student.firstName,
+                student.lastName,
+                classroomName,
+                getClassroomExportTypeLabel(type),
+                ...checkedDates.map(date =>
+                    statusByStudentTypeAndDate.get(`${student.citizenId}|${type}|${date}`) ?? ''
+                )
+            ]);
+            const worksheet = XLSX.utils.aoa_to_sheet([header, ...rows]);
+
+            worksheet['!cols'] = [
+                { wch: 8 },
+                { wch: 18 },
+                { wch: 20 },
+                { wch: 20 },
+                { wch: 14 },
+                { wch: 14 },
+                ...checkedDates.map(() => ({ wch: 13 }))
+            ];
+            worksheet['!autofilter'] = { ref: worksheet['!ref'] ?? 'A1:F1' };
+            checkedDateCountByType.set(type, checkedDates.length);
+            XLSX.utils.book_append_sheet(workbook, worksheet, getClassroomExportTypeLabel(type));
+        });
+
+        const summarySheet = XLSX.utils.aoa_to_sheet([
+            ['รายงานการเช็คชื่อรายห้อง'],
+            ['วันที่ส่งออก', formatDateTime(new Date().toISOString())],
+            ['ห้องเรียน', classroomName],
+            ['ภาคเรียน', activeTerm ? `ภาคเรียน ${activeTerm.term}/${activeTerm.year}` : 'ภาคเรียนปัจจุบัน'],
+            ['รูปแบบชีต', 'แยกข้อมูลเป็นชีตเข้าแถวและชีตเขตพื้นที่'],
+            ['จำนวนวันที่เช็คเข้าแถว', checkedDateCountByType.get('ASSEMBLY') ?? 0],
+            ['จำนวนวันที่เช็คเขตพื้นที่', checkedDateCountByType.get('AREA') ?? 0],
+            ['จำนวนนักเรียน', sortedStudents.length]
+        ]);
+
+        summarySheet['!cols'] = [{ wch: 26 }, { wch: 48 }];
+
+        XLSX.utils.book_append_sheet(workbook, summarySheet, 'สรุปเงื่อนไข');
+        XLSX.writeFile(
+            workbook,
+            `รายงานเช็คชื่อ_${classroomName}_${activeTerm ? `${activeTerm.term}-${activeTerm.year}` : getTodayString()}.xlsx`
+        );
+        toast.success('ส่งออกไฟล์ Excel สำเร็จ');
+    };
+
+    const handleExportDailyStatistics = async () => {
         const exportKey = 'school-daily';
         try {
             setExportingKey(exportKey);
+            const reportDate = filterDate || getTodayString();
             const params = new URLSearchParams();
-            if (filterDate) params.append('date', filterDate);
-            if (filterType !== 'ALL') params.append('type', filterType);
+            params.append('date', reportDate);
 
-            const records = await fetchAttendanceForExport(params);
-            exportAttendanceWorkbook(
-                records,
-                [
-                    ['ประเภทไฟล์', 'ทั้งโรงเรียนรายวัน'],
-                    ['วันที่', filterDate || 'ทุกวันที่'],
-                    ['ประเภทการเช็คชื่อ', filterType === 'ALL' ? 'รวมทุกประเภท' : getTypeLabel(filterType)]
-                ],
-                `รายงานเช็คชื่อทั้งโรงเรียน_${filterDate || getTodayString()}.xlsx`,
-                'ทั้งโรงเรียน'
-            );
+            const [records, summaryRes] = await Promise.all([
+                fetchAttendanceForExport(params),
+                api.get(`/attendance/summary/daily?${params.toString()}`)
+            ]);
+            exportDailyStatisticsWorkbook(records, summaryRes.data.summary || [], reportDate);
         } catch (error) {
-            toast.error('ไม่สามารถส่งออกรายงานทั้งโรงเรียนได้');
+            toast.error('ไม่สามารถส่งออกสถิติประจำวันได้');
         } finally {
             setExportingKey(null);
         }
     };
 
-    const handleExportClassroomDaily = async (classroomId: number, classroomName: string) => {
+    const handleExportClassroom = async (classroomId: number, classroomName: string) => {
         const exportKey = `classroom-${classroomId}`;
         try {
             setExportingKey(exportKey);
-            const params = new URLSearchParams();
-            if (filterDate) params.append('date', filterDate);
-            params.append('classroomId', String(classroomId));
-            if (filterType !== 'ALL') params.append('type', filterType);
+            const [studentsRes, records] = await Promise.all([
+                api.get(`/students?classroomId=${classroomId}`),
+                fetchClassroomAttendanceForExport(classroomId)
+            ]);
 
-            const records = await fetchAttendanceForExport(params);
-            exportAttendanceWorkbook(
-                records,
-                [
-                    ['ประเภทไฟล์', 'รายห้องรายวัน'],
-                    ['ห้องเรียน', classroomName],
-                    ['วันที่', filterDate || 'ทุกวันที่'],
-                    ['ประเภทการเช็คชื่อ', filterType === 'ALL' ? 'รวมทุกประเภท' : getTypeLabel(filterType)]
-                ],
-                `รายงานเช็คชื่อ_${classroomName}_${filterDate || getTodayString()}.xlsx`,
-                classroomName
-            );
+            exportClassroomAttendanceWorkbook(studentsRes.data as AttendanceStudent[], records, classroomName);
         } catch (error) {
-            toast.error('ไม่สามารถส่งออกรายงานรายห้องได้');
-        } finally {
-            setExportingKey(null);
-        }
-    };
-
-    const handleExportStudentCurrentTerm = async (record: AttendanceRecord) => {
-        const studentName = `${record.student.firstName} ${record.student.lastName}`;
-        const exportKey = `student-${record.student.citizenId}`;
-
-        try {
-            setExportingKey(exportKey);
-            const records = await fetchStudentAttendanceForExport(record);
-
-            exportAttendanceWorkbook(
-                records,
-                [
-                    ['ประเภทไฟล์', 'รายบุคคลทั้งภาคเรียนปัจจุบัน'],
-                    ['นักเรียน', `${studentName} (${record.student.citizenId})`],
-                    ['ห้องเรียน', record.student.classroom?.name ?? ''],
-                    ['ภาคเรียน', activeTerm ? `ภาคเรียน ${activeTerm.term}/${activeTerm.year}` : 'ภาคเรียนปัจจุบัน'],
-                    ['ช่วงข้อมูล', 'ทุกวันที่ในภาคเรียนปัจจุบัน'],
-                    ['ประเภทการเช็คชื่อ', 'รวมทุกประเภท']
-                ],
-                `ประวัติเช็คชื่อ_${studentName}_${activeTerm ? `${activeTerm.term}-${activeTerm.year}` : 'เทอมปัจจุบัน'}.xlsx`,
-                studentName
-            );
-        } catch (error) {
-            toast.error('ไม่สามารถส่งออกประวัติรายบุคคลได้');
+            toast.error(error instanceof Error ? error.message : 'ไม่สามารถส่งออกรายงานรายห้องได้');
         } finally {
             setExportingKey(null);
         }
@@ -470,11 +820,11 @@ export default function AttendanceReports() {
                     <p className="text-gray-500">ดูประวัติรายบุคคล และสรุปสถิติการมาเรียนรายวัน</p>
                 </div>
                 <button
-                    onClick={handleExportSchoolDaily}
+                    onClick={handleExportDailyStatistics}
                     disabled={exportingKey !== null}
                     className="flex items-center justify-center gap-2 border border-secondary/50 bg-secondary/25 hover:bg-secondary/40 text-[#6b5400] px-5 py-2.5 rounded-lg font-bold transition-colors disabled:opacity-60"
                 >
-                    <FileDown size={20} /> Export ทั้งโรงเรียนรายวัน
+                    <FileDown size={20} /> Export สถิติประจำวัน
                 </button>
             </div>
 
@@ -572,17 +922,7 @@ export default function AttendanceReports() {
                                             <td className="p-4">{getTypeBadge(record.type)}</td>
                                             <td className="p-4 font-mono text-gray-500 text-sm">{record.student.citizenId}</td>
                                             <td className="p-4">
-                                                <div className="flex items-center gap-2">
-                                                    <span className="font-bold text-gray-800">{record.student.firstName} {record.student.lastName}</span>
-                                                    <button
-                                                        onClick={() => handleExportStudentCurrentTerm(record)}
-                                                        disabled={exportingKey !== null}
-                                                        className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-primary/20 bg-white px-2.5 py-1 text-xs font-bold text-primary transition-colors hover:bg-primary/5 disabled:opacity-60"
-                                                        title="Export ประวัติการเช็คชื่อทุกวันที่ในเทอมปัจจุบันของนักเรียนคนนี้"
-                                                    >
-                                                        <FileDown size={13} /> Excel
-                                                    </button>
-                                                </div>
+                                                <span className="font-bold text-gray-800">{record.student.firstName} {record.student.lastName}</span>
                                             </td>
                                             <td className="p-4 text-gray-700">{record.student.classroom.name}</td>
                                             <td className="p-4">{getStatusBadge(record.status)}</td>
@@ -714,10 +1054,10 @@ export default function AttendanceReports() {
                                                 </td>
                                                 <td className="p-4 text-right">
                                                     <button
-                                                        onClick={() => handleExportClassroomDaily(s.classroomId, s.classroomName)}
+                                                        onClick={() => handleExportClassroom(s.classroomId, s.classroomName)}
                                                         disabled={exportingKey !== null}
                                                         className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-primary/20 bg-white px-3 py-1.5 text-xs font-bold text-primary transition-colors hover:bg-primary/5 disabled:opacity-60"
-                                                        title="Export รายชื่อนักเรียนและประวัติเช็คชื่อของห้องนี้ในวันที่เลือก"
+                                                        title="Export รายชื่อนักเรียนและสถานะเช็คชื่อตามวันที่ของภาคเรียนปัจจุบัน"
                                                     >
                                                         <FileDown size={14} /> Excel
                                                     </button>

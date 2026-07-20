@@ -20,7 +20,7 @@
     "react-router-dom": "^7.14.2",
     "recharts": "^3.8.1",
     "sweetalert2": "^11.26.24",
-    "xlsx": "^0.18.5"
+    "xlsx-js-style": "^1.2.0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

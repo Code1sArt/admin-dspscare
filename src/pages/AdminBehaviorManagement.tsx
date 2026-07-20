@@ -8,7 +8,7 @@ import {
 import { Combobox } from '@headlessui/react';
 import toast from 'react-hot-toast';
 import Swal from 'sweetalert2';
-import * as XLSX from 'xlsx';
+import * as XLSX from 'xlsx-js-style';
 import api from '../services/api';
 
 // --- Types ---

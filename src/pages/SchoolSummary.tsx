@@ -5,7 +5,7 @@ import {
     ChevronLeft, ChevronRight
 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import * as XLSX from 'xlsx';
+import * as XLSX from 'xlsx-js-style';
 import api from '../services/api';
 
 // --- Types ---
