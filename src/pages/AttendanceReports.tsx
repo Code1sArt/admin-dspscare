@@ -81,6 +81,7 @@ interface SummaryData {
 interface DailyStudentGroups {
     absent: Set<string>;
     leave: Set<string>;
+    late: Set<string>;
     assembly: Set<string>;
     area: Set<string>;
     activity: Set<string>;
@@ -190,6 +191,7 @@ const getGradeLevel = (classroomName: string) => {
 const createEmptyDailyStudentGroups = (): DailyStudentGroups => ({
     absent: new Set<string>(),
     leave: new Set<string>(),
+    late: new Set<string>(),
     assembly: new Set<string>(),
     area: new Set<string>(),
     activity: new Set<string>()
@@ -201,6 +203,7 @@ const getPercentage = (value: number, total: number) =>
 const mergeStudentGroups = (target: DailyStudentGroups, source: DailyStudentGroups) => {
     source.absent.forEach(studentId => target.absent.add(studentId));
     source.leave.forEach(studentId => target.leave.add(studentId));
+    source.late.forEach(studentId => target.late.add(studentId));
     source.assembly.forEach(studentId => target.assembly.add(studentId));
     source.area.forEach(studentId => target.area.add(studentId));
     source.activity.forEach(studentId => target.activity.add(studentId));
@@ -395,6 +398,7 @@ export default function AttendanceReports() {
 
             if (record.status === 'ABSENT') groups.absent.add(studentId);
             if (record.status === 'LEAVE') groups.leave.add(studentId);
+            if (record.status === 'LATE') groups.late.add(studentId);
             if (['PRESENT', 'LATE'].includes(record.status)) {
                 if (record.type === 'ASSEMBLY') groups.assembly.add(studentId);
                 if (record.type === 'AREA') groups.area.add(studentId);
@@ -428,6 +432,7 @@ export default function AttendanceReports() {
                 totalStudents,
                 displayCount(groups.absent.size),
                 displayCount(groups.leave.size),
+                displayCount(groups.late.size),
                 displayCount(absentOrLeaveCount),
                 getPercentage(absentOrLeaveCount, totalStudents),
                 displayCount(groups.area.size),
@@ -487,7 +492,8 @@ export default function AttendanceReports() {
         const groupHeader = [
             'ระดับชั้น',
             'จำนวน\nทั้งหมด',
-            'จำนวนนักเรียนที่ขาด/ลา',
+            'จำนวนนักเรียนที่ขาด/ลา/สาย',
+            '',
             '',
             '',
             '',
@@ -502,6 +508,7 @@ export default function AttendanceReports() {
             '',
             'จำนวนที่ขาด',
             'จำนวนที่ลา',
+            'จำนวนมาสาย',
             'รวม\nขาด ลา',
             'ขาดลา\nคิดเป็นร้อยละ',
             'จำนวนเข้าเขตฯ',
@@ -528,6 +535,7 @@ export default function AttendanceReports() {
             { wch: 12 },
             { wch: 11 },
             { wch: 11 },
+            { wch: 12 },
             { wch: 11 },
             { wch: 14 },
             { wch: 14 },
@@ -543,12 +551,12 @@ export default function AttendanceReports() {
             worksheet['!rows']![rowNumber - 1] = { hpt: 34 };
         });
         worksheet['!merges'] = [
-            XLSX.utils.decode_range('A1:K1'),
-            XLSX.utils.decode_range('A2:K2'),
+            XLSX.utils.decode_range('A1:L1'),
+            XLSX.utils.decode_range('A2:L2'),
             XLSX.utils.decode_range('A3:A4'),
             XLSX.utils.decode_range('B3:B4'),
-            XLSX.utils.decode_range('C3:F3'),
-            XLSX.utils.decode_range('G3:K3')
+            XLSX.utils.decode_range('C3:G3'),
+            XLSX.utils.decode_range('H3:L3')
         ];
 
         const baseFont = { name: 'TH Sarabun New', sz: 16, color: { rgb: '000000' } };
@@ -575,28 +583,28 @@ export default function AttendanceReports() {
             }
         };
         const lastRow = sheetRows.length;
-        applyStyle(`A1:K${lastRow}`, {
+        applyStyle(`A1:L${lastRow}`, {
             font: baseFont,
             alignment: centered
         });
-        applyStyle('A1:K2', {
+        applyStyle('A1:L2', {
             font: { ...baseFont, bold: true, sz: 18 },
             alignment: centered
         });
-        applyStyle('A3:K4', {
+        applyStyle('A3:L4', {
             font: { ...baseFont, bold: true },
             fill: { patternType: 'solid', fgColor: { rgb: 'D0D0D0' } },
             alignment: centered,
             border: thinBorder
         });
         gradeSummaryRowNumbers.forEach(rowNumber => {
-            applyStyle(`A${rowNumber}:K${rowNumber}`, {
+            applyStyle(`A${rowNumber}:L${rowNumber}`, {
                 font: { ...baseFont, bold: true },
                 fill: { patternType: 'solid', fgColor: { rgb: 'D0D0D0' } },
                 alignment: centered
             });
         });
-        applyStyle(`A${schoolSummaryRowNumber}:K${schoolSummaryRowNumber}`, {
+        applyStyle(`A${schoolSummaryRowNumber}:L${schoolSummaryRowNumber}`, {
             font: { ...baseFont, bold: true },
             alignment: centered,
             border: {
@@ -604,8 +612,8 @@ export default function AttendanceReports() {
             }
         });
         for (let row = 5; row <= lastRow; row += 1) {
-            const absentPercentageCell = worksheet[`F${row}`];
-            const presentPercentageCell = worksheet[`K${row}`];
+            const absentPercentageCell = worksheet[`G${row}`];
+            const presentPercentageCell = worksheet[`L${row}`];
             if (absentPercentageCell) absentPercentageCell.z = '0.##';
             if (presentPercentageCell) presentPercentageCell.z = '0.##';
         }
