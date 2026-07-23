@@ -119,8 +119,7 @@ interface AttendanceHistoryRecord {
     };
 }
 
-interface AttendanceTotals {
-    students: number;
+interface AttendanceTypeTotals {
     checked: number;
     notChecked: number;
     present: number;
@@ -128,6 +127,12 @@ interface AttendanceTotals {
     late: number;
     leave: number;
     activity: number;
+}
+
+interface AttendanceTotals {
+    students: number;
+    assembly: AttendanceTypeTotals;
+    area: AttendanceTypeTotals;
 }
 
 interface CalendarResponse {
@@ -199,8 +204,7 @@ const getApiErrorMessage = (error: unknown, fallback: string) => {
     return error.response?.data?.message || fallback;
 };
 
-const emptyAttendanceTotals = (): AttendanceTotals => ({
-    students: 0,
+const emptyAttendanceTypeTotals = (): AttendanceTypeTotals => ({
     checked: 0,
     notChecked: 0,
     present: 0,
@@ -208,6 +212,12 @@ const emptyAttendanceTotals = (): AttendanceTotals => ({
     late: 0,
     leave: 0,
     activity: 0
+});
+
+const emptyAttendanceTotals = (): AttendanceTotals => ({
+    students: 0,
+    assembly: emptyAttendanceTypeTotals(),
+    area: emptyAttendanceTypeTotals()
 });
 
 const parseAttendanceRecords = (data: unknown): AttendanceHistoryRecord[] => {
@@ -239,42 +249,40 @@ const calculateUniqueAttendanceTotals = (
             latestRecordByStudentAndType.set(`${record.student.citizenId}|${record.type}`, record);
         });
 
-    const checkedStudents = new Set<string>();
-    const absentStudents = new Set<string>();
-    const leaveStudents = new Set<string>();
-    const lateAssemblyStudents = new Set<string>();
-    const activityStudents = new Set<string>();
-    const assemblyPresentOrLateStudents = new Set<string>();
-    const areaPresentOrLateStudents = new Set<string>();
+    const calculateTypeTotals = (type: AttendanceHistoryRecord['type']): AttendanceTypeTotals => {
+        const checkedStudents = new Set<string>();
+        const presentStudents = new Set<string>();
+        const absentStudents = new Set<string>();
+        const leaveStudents = new Set<string>();
+        const lateStudents = new Set<string>();
+        const activityStudents = new Set<string>();
 
-    latestRecordByStudentAndType.forEach(record => {
-        const studentId = record.student.citizenId;
-        checkedStudents.add(studentId);
-        if (record.status === 'ABSENT') absentStudents.add(studentId);
-        if (record.status === 'LEAVE') leaveStudents.add(studentId);
-        if (record.status === 'LATE' && record.type === 'ASSEMBLY') lateAssemblyStudents.add(studentId);
-        if (record.status === 'ACTIVITY') activityStudents.add(studentId);
-        if (record.status === 'PRESENT' || record.status === 'LATE') {
-            if (record.type === 'ASSEMBLY') assemblyPresentOrLateStudents.add(studentId);
-            if (record.type === 'AREA') areaPresentOrLateStudents.add(studentId);
-        }
-    });
+        latestRecordByStudentAndType.forEach(record => {
+            if (record.type !== type) return;
+            const studentId = record.student.citizenId;
+            checkedStudents.add(studentId);
+            if (record.status === 'PRESENT' || record.status === 'LATE') presentStudents.add(studentId);
+            if (record.status === 'ABSENT') absentStudents.add(studentId);
+            if (record.status === 'LEAVE') leaveStudents.add(studentId);
+            if (record.status === 'LATE' && type === 'ASSEMBLY') lateStudents.add(studentId);
+            if (record.status === 'ACTIVITY') activityStudents.add(studentId);
+        });
 
-    const presentStudents = new Set([
-        ...assemblyPresentOrLateStudents,
-        ...areaPresentOrLateStudents
-    ]);
-    const checked = checkedStudents.size;
+        return {
+            checked: checkedStudents.size,
+            notChecked: Math.max(students - checkedStudents.size, 0),
+            present: presentStudents.size,
+            absent: absentStudents.size,
+            late: lateStudents.size,
+            leave: leaveStudents.size,
+            activity: activityStudents.size
+        };
+    };
 
     return {
         students,
-        checked,
-        notChecked: Math.max(students - checked, 0),
-        present: presentStudents.size,
-        absent: absentStudents.size,
-        late: lateAssemblyStudents.size,
-        leave: leaveStudents.size,
-        activity: activityStudents.size
+        assembly: calculateTypeTotals('ASSEMBLY'),
+        area: calculateTypeTotals('AREA')
     };
 };
 
@@ -629,55 +637,27 @@ export default function Dashboard() {
                 </div>
 
                 <div className="rounded-3xl border border-gray-100 bg-white p-6 shadow-sm">
-                    <div className="mb-5 flex items-start justify-between gap-4">
+                    <div className="mb-5">
                         <div>
                             <h2 className="flex items-center gap-2 text-lg font-black text-gray-900">
                                 <Clock3 className="text-primary" size={21} />
                                 เช็คชื่อนักเรียนวันนี้
                             </h2>
-                            <p className="mt-1 text-sm text-gray-500">รวมทุกห้องจากรายงานประจำวัน</p>
+                            <p className="mt-1 text-sm text-gray-500">แยกนักเรียนไม่ซ้ำคนตามประเภทการเช็คชื่อ</p>
                         </div>
-                        <span className="rounded-full bg-secondary/30 px-3 py-1 text-xs font-bold text-[#7a5f00]">
-                            {percent(attendanceTotals.checked, attendanceTotals.students)}%
-                        </span>
                     </div>
 
                     <div className="space-y-4">
-                        <AttendanceBar
-                            label="มาเรียน (รวมสาย)"
-                            value={attendanceTotals.present}
-                            total={attendanceTotals.students}
-                            color="bg-primary"
+                        <AttendanceTypePanel
+                            title="เขตพื้นที่"
+                            totals={attendanceTotals.area}
+                            students={attendanceTotals.students}
                         />
-                        <AttendanceBar
-                            label="มาสาย"
-                            value={attendanceTotals.late}
-                            total={attendanceTotals.students}
-                            color="bg-secondary"
-                        />
-                        <AttendanceBar
-                            label="ลา"
-                            value={attendanceTotals.leave}
-                            total={attendanceTotals.students}
-                            color="bg-primary/70"
-                        />
-                        <AttendanceBar
-                            label="กิจกรรม"
-                            value={attendanceTotals.activity}
-                            total={attendanceTotals.students}
-                            color="bg-cyan-500"
-                        />
-                        <AttendanceBar
-                            label="ขาด"
-                            value={attendanceTotals.absent}
-                            total={attendanceTotals.students}
-                            color="bg-rose-500"
-                        />
-                        <AttendanceBar
-                            label="ยังไม่เช็ค"
-                            value={attendanceTotals.notChecked}
-                            total={attendanceTotals.students}
-                            color="bg-gray-400"
+                        <AttendanceTypePanel
+                            title="เข้าแถว"
+                            totals={attendanceTotals.assembly}
+                            students={attendanceTotals.students}
+                            showLate
                         />
                     </div>
 
@@ -1001,26 +981,46 @@ function DistributionRow({ icon: Icon, label, value, total, color, textColor }: 
     );
 }
 
-interface AttendanceBarProps {
-    label: string;
-    value: number;
-    total: number;
-    color: string;
+interface AttendanceTypePanelProps {
+    title: string;
+    totals: AttendanceTypeTotals;
+    students: number;
+    showLate?: boolean;
 }
 
-function AttendanceBar({ label, value, total, color }: AttendanceBarProps) {
-    const width = percent(value, total);
+function AttendanceTypePanel({ title, totals, students, showLate = false }: AttendanceTypePanelProps) {
+    const checkedPercentage = percent(totals.checked, students);
+    const statistics = [
+        { label: 'มา (รวมสาย)', value: totals.present, color: 'text-primary', background: 'bg-primary/10' },
+        ...(showLate
+            ? [{ label: 'มาสาย', value: totals.late, color: 'text-[#8a6b00]', background: 'bg-secondary/25' }]
+            : []),
+        { label: 'ลา', value: totals.leave, color: 'text-blue-700', background: 'bg-blue-50' },
+        { label: 'กิจกรรม', value: totals.activity, color: 'text-cyan-700', background: 'bg-cyan-50' },
+        { label: 'ขาด', value: totals.absent, color: 'text-rose-700', background: 'bg-rose-50' },
+        { label: 'ยังไม่เช็ค', value: totals.notChecked, color: 'text-gray-600', background: 'bg-gray-100' }
+    ];
 
     return (
-        <div>
-            <div className="mb-1 flex items-center justify-between text-sm">
-                <span className="font-bold text-gray-700">{label}</span>
-                <span className="font-semibold text-gray-500">
-                    {numberFormat.format(value)} คน · {width}%
+        <div className="rounded-2xl border border-gray-100 bg-gray-50/60 p-4">
+            <div className="flex items-center justify-between gap-3">
+                <h3 className="font-black text-gray-800">{title}</h3>
+                <span className="rounded-full bg-white px-3 py-1 text-xs font-bold text-primary shadow-sm">
+                    เช็คแล้ว {numberFormat.format(totals.checked)}/{numberFormat.format(students)} คน · {checkedPercentage}%
                 </span>
             </div>
-            <div className="h-2.5 overflow-hidden rounded-full bg-gray-100">
-                <div className={`h-full rounded-full ${color}`} style={{ width: `${width}%` }} />
+            <div className="mt-3 h-2 overflow-hidden rounded-full bg-gray-200">
+                <div className="h-full rounded-full bg-primary" style={{ width: `${checkedPercentage}%` }} />
+            </div>
+            <div className="mt-3 grid grid-cols-2 gap-2">
+                {statistics.map(statistic => (
+                    <div key={statistic.label} className={`rounded-xl px-3 py-2 ${statistic.background}`}>
+                        <p className={`text-lg font-black ${statistic.color}`}>
+                            {numberFormat.format(statistic.value)}
+                        </p>
+                        <p className="text-[11px] font-medium text-gray-500">{statistic.label}</p>
+                    </div>
+                ))}
             </div>
         </div>
     );
