@@ -581,8 +581,8 @@ export default function Dashboard() {
                 />
             </section>
 
-            <section className="grid gap-6 xl:grid-cols-[minmax(0,1.2fr)_minmax(360px,0.8fr)]">
-                <div className="rounded-3xl border border-gray-100 bg-white p-6 shadow-sm">
+            <section className="grid gap-6">
+                <div className="order-2 rounded-3xl border border-gray-100 bg-white p-6 shadow-sm">
                     <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                         <div>
                             <h2 className="flex items-center gap-2 text-lg font-black text-gray-900">
@@ -636,7 +636,7 @@ export default function Dashboard() {
                     </div>
                 </div>
 
-                <div className="rounded-3xl border border-gray-100 bg-white p-6 shadow-sm">
+                <div className="order-1 rounded-3xl border border-gray-100 bg-white p-6 shadow-sm">
                     <div className="mb-5">
                         <div>
                             <h2 className="flex items-center gap-2 text-lg font-black text-gray-900">
@@ -647,7 +647,7 @@ export default function Dashboard() {
                         </div>
                     </div>
 
-                    <div className="space-y-4">
+                    <div className="grid gap-4 lg:grid-cols-2">
                         <AttendanceTypePanel
                             title="เขตพื้นที่"
                             totals={attendanceTotals.area}
