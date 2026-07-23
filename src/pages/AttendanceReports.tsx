@@ -398,7 +398,7 @@ export default function AttendanceReports() {
 
             if (record.status === 'ABSENT') groups.absent.add(studentId);
             if (record.status === 'LEAVE') groups.leave.add(studentId);
-            if (record.status === 'LATE') groups.late.add(studentId);
+            if (record.status === 'LATE' && record.type === 'ASSEMBLY') groups.late.add(studentId);
             if (['PRESENT', 'LATE'].includes(record.status)) {
                 if (record.type === 'ASSEMBLY') groups.assembly.add(studentId);
                 if (record.type === 'AREA') groups.area.add(studentId);
