@@ -109,6 +109,27 @@ interface AttendanceSummaryResponse {
     summary: AttendanceSummaryItem[];
 }
 
+interface AttendanceHistoryRecord {
+    id: string;
+    type: 'ASSEMBLY' | 'AREA';
+    status: 'PRESENT' | 'ABSENT' | 'LATE' | 'LEAVE' | 'ACTIVITY';
+    date: string;
+    student: {
+        citizenId: string;
+    };
+}
+
+interface AttendanceTotals {
+    students: number;
+    checked: number;
+    notChecked: number;
+    present: number;
+    absent: number;
+    late: number;
+    leave: number;
+    activity: number;
+}
+
 interface CalendarResponse {
     termId: number;
     workingDays: number;
@@ -178,13 +199,92 @@ const getApiErrorMessage = (error: unknown, fallback: string) => {
     return error.response?.data?.message || fallback;
 };
 
+const emptyAttendanceTotals = (): AttendanceTotals => ({
+    students: 0,
+    checked: 0,
+    notChecked: 0,
+    present: 0,
+    absent: 0,
+    late: 0,
+    leave: 0,
+    activity: 0
+});
+
+const parseAttendanceRecords = (data: unknown): AttendanceHistoryRecord[] => {
+    const response = data as {
+        records?: AttendanceHistoryRecord[] | {
+            ASSEMBLY?: AttendanceHistoryRecord[];
+            AREA?: AttendanceHistoryRecord[];
+        };
+    };
+    if (Array.isArray(data)) return data as AttendanceHistoryRecord[];
+    if (Array.isArray(response?.records)) return response.records;
+
+    return [
+        ...(response?.records?.ASSEMBLY ?? []),
+        ...(response?.records?.AREA ?? [])
+    ];
+};
+
+const calculateUniqueAttendanceTotals = (
+    summary: AttendanceSummaryItem[],
+    records: AttendanceHistoryRecord[]
+): AttendanceTotals => {
+    const students = summary.reduce((total, item) => total + item.statistics.totalStudents, 0);
+    const latestRecordByStudentAndType = new Map<string, AttendanceHistoryRecord>();
+    records
+        .slice()
+        .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+        .forEach(record => {
+            latestRecordByStudentAndType.set(`${record.student.citizenId}|${record.type}`, record);
+        });
+
+    const checkedStudents = new Set<string>();
+    const absentStudents = new Set<string>();
+    const leaveStudents = new Set<string>();
+    const lateAssemblyStudents = new Set<string>();
+    const activityStudents = new Set<string>();
+    const assemblyPresentOrLateStudents = new Set<string>();
+    const areaPresentOrLateStudents = new Set<string>();
+
+    latestRecordByStudentAndType.forEach(record => {
+        const studentId = record.student.citizenId;
+        checkedStudents.add(studentId);
+        if (record.status === 'ABSENT') absentStudents.add(studentId);
+        if (record.status === 'LEAVE') leaveStudents.add(studentId);
+        if (record.status === 'LATE' && record.type === 'ASSEMBLY') lateAssemblyStudents.add(studentId);
+        if (record.status === 'ACTIVITY') activityStudents.add(studentId);
+        if (record.status === 'PRESENT' || record.status === 'LATE') {
+            if (record.type === 'ASSEMBLY') assemblyPresentOrLateStudents.add(studentId);
+            if (record.type === 'AREA') areaPresentOrLateStudents.add(studentId);
+        }
+    });
+
+    const presentStudents = new Set([
+        ...assemblyPresentOrLateStudents,
+        ...areaPresentOrLateStudents
+    ]);
+    const checked = checkedStudents.size;
+
+    return {
+        students,
+        checked,
+        notChecked: Math.max(students - checked, 0),
+        present: presentStudents.size,
+        absent: absentStudents.size,
+        late: lateAssemblyStudents.size,
+        leave: leaveStudents.size,
+        activity: activityStudents.size
+    };
+};
+
 export default function Dashboard() {
     const [terms, setTerms] = useState<Term[]>([]);
     const [classrooms, setClassrooms] = useState<Classroom[]>([]);
     const [teachers, setTeachers] = useState<Teacher[]>([]);
     const [schoolSummary, setSchoolSummary] = useState<SummaryResponse | null>(null);
     const [missingReport, setMissingReport] = useState<MissingReportResponse | null>(null);
-    const [attendanceSummary, setAttendanceSummary] = useState<AttendanceSummaryItem[]>([]);
+    const [attendanceTotals, setAttendanceTotals] = useState<AttendanceTotals>(emptyAttendanceTotals);
     const [calendar, setCalendar] = useState<CalendarResponse | null>(null);
     const [loading, setLoading] = useState(true);
     const [loadWarnings, setLoadWarnings] = useState<string[]>([]);
@@ -208,22 +308,6 @@ export default function Dashboard() {
         if (!activeTerm) return classrooms;
         return classrooms.filter(room => room.termId === activeTerm.id);
     }, [activeTerm, classrooms]);
-
-    const attendanceTotals = useMemo(() => {
-        return attendanceSummary.reduce(
-            (total, item) => ({
-                students: total.students + item.statistics.totalStudents,
-                checked: total.checked + item.statistics.totalChecked,
-                notChecked: total.notChecked + item.statistics.notChecked,
-                present: total.present + item.statistics.present,
-                absent: total.absent + item.statistics.absent,
-                late: total.late + item.statistics.late,
-                leave: total.leave + item.statistics.leave,
-                activity: total.activity + (item.statistics.activity ?? 0)
-            }),
-            { students: 0, checked: 0, notChecked: 0, present: 0, absent: 0, late: 0, leave: 0, activity: 0 }
-        );
-    }, [attendanceSummary]);
 
     const teacherRoleCounts = useMemo(() => {
         return teachers.reduce<Record<Teacher['role'], number>>(
@@ -339,12 +423,13 @@ export default function Dashboard() {
                 const summaryParams = new URLSearchParams();
                 if (currentTerm?.id) summaryParams.append('termId', String(currentTerm.id));
 
-                const [summaryResult, missingResult, attendanceResult, calendarResult] = await Promise.allSettled([
+                const [summaryResult, missingResult, attendanceSummaryResult, attendanceHistoryResult, calendarResult] = await Promise.allSettled([
                     api.get<SummaryResponse>(
                         `/summary/school-wide${summaryParams.toString() ? `?${summaryParams.toString()}` : ''}`
                     ),
                     api.get<MissingReportResponse>('/attendance/missing-report', { params: { date: today } }),
                     api.get<AttendanceSummaryResponse>('/attendance/summary/daily', { params: { date: today } }),
+                    api.get('/attendance/history/daily', { params: { date: today } }),
                     currentTerm?.id
                         ? api.get<CalendarResponse>(`/terms/${currentTerm.id}/calendar`, {
                             params: { month: currentMonth }
@@ -366,10 +451,13 @@ export default function Dashboard() {
                     warnings.push('สถานะเช็คชื่อครู');
                 }
 
-                if (attendanceResult.status === 'fulfilled') {
-                    setAttendanceSummary(attendanceResult.value.data.summary ?? []);
+                if (attendanceSummaryResult.status === 'fulfilled' && attendanceHistoryResult.status === 'fulfilled') {
+                    setAttendanceTotals(calculateUniqueAttendanceTotals(
+                        attendanceSummaryResult.value.data.summary ?? [],
+                        parseAttendanceRecords(attendanceHistoryResult.value.data)
+                    ));
                 } else {
-                    setAttendanceSummary([]);
+                    setAttendanceTotals(emptyAttendanceTotals());
                     warnings.push('สถิติเช็คชื่อนักเรียน');
                 }
 
@@ -556,7 +644,7 @@ export default function Dashboard() {
 
                     <div className="space-y-4">
                         <AttendanceBar
-                            label="มาเรียน"
+                            label="มาเรียน (รวมสาย)"
                             value={attendanceTotals.present}
                             total={attendanceTotals.students}
                             color="bg-primary"
