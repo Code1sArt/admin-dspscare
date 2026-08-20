@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import {
     Search, Plus, Upload, Edit, Trash2, X,
-    ChevronLeft, ChevronRight, Filter, Download, FileSpreadsheet, Info, CheckCircle2
+    ChevronLeft, ChevronRight, Filter, Download, FileSpreadsheet, Info, CheckCircle2, Unlink
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import Swal from 'sweetalert2';
@@ -101,6 +101,7 @@ export default function Teachers() {
     const [teachers, setTeachers] = useState<Teacher[]>([]);
     const [loading, setLoading] = useState(true);
     const [currentUserId, setCurrentUserId] = useState('');
+    const [resettingLineUserId, setResettingLineUserId] = useState<string | null>(null);
 
     // --- State สำหรับค้นหาและกรอง ---
     const [searchQuery, setSearchQuery] = useState('');
@@ -251,6 +252,40 @@ export default function Teachers() {
                 }
             }
         });
+    };
+
+    const handleResetLineConnection = async (teacher: Teacher) => {
+        const id = getTeacherId(teacher);
+        const name = `${teacher.firstName} ${teacher.lastName}`.trim();
+
+        if (!id) {
+            toast.error('ไม่พบรหัสอ้างอิงของบุคลากร ไม่สามารถรีเซ็ตการเชื่อมต่อ LINE ได้');
+            return;
+        }
+
+        const result = await Swal.fire({
+            title: 'รีเซ็ตการเชื่อมต่อ LINE?',
+            text: `บัญชีของ ${name} จะหยุดรับการแจ้งเตือน จนกว่าจะเชื่อมต่อบัญชี LINE ใหม่`,
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonColor: '#f97316',
+            confirmButtonText: 'รีเซ็ตการเชื่อมต่อ',
+            cancelButtonText: 'ยกเลิก'
+        });
+
+        if (!result.isConfirmed) return;
+
+        const toastId = toast.loading('กำลังรีเซ็ตการเชื่อมต่อ LINE...');
+        setResettingLineUserId(id);
+        try {
+            await api.patch(`/users/${id}`, { lineUserId: null });
+            toast.success('รีเซ็ตการเชื่อมต่อ LINE สำเร็จ', { id: toastId });
+            await fetchTeachers();
+        } catch (error) {
+            toast.error(getErrorMessage(error, 'ไม่สามารถรีเซ็ตการเชื่อมต่อ LINE ได้'), { id: toastId });
+        } finally {
+            setResettingLineUserId(null);
+        }
     };
 
     const handleExcelUpload = async () => {
@@ -449,20 +484,22 @@ export default function Teachers() {
 
             {/* Table */}
             <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-                <table className="w-full text-left">
+                <div className="overflow-x-auto">
+                <table className="w-full text-left whitespace-nowrap">
                     <thead className="bg-gray-50 border-b border-gray-100 text-sm text-gray-600">
                         <tr>
                             <th className="p-4 font-medium">ชื่อ-นามสกุล</th>
                             <th className="p-4 font-medium">Username (ID)</th>
                             <th className="p-4 font-medium">ระดับสิทธิ์</th>
+                            <th className="p-4 font-medium">สถานะ LINE</th>
                             <th className="p-4 font-medium text-center">จัดการ</th>
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100">
                         {loading ? (
-                            <tr><td colSpan={4} className="p-8 text-center text-gray-500">กำลังโหลดข้อมูล...</td></tr>
+                            <tr><td colSpan={5} className="p-8 text-center text-gray-500">กำลังโหลดข้อมูล...</td></tr>
                         ) : paginatedData.length === 0 ? (
-                            <tr><td colSpan={4} className="p-8 text-center text-gray-500">ไม่พบข้อมูลบุคลากร</td></tr>
+                            <tr><td colSpan={5} className="p-8 text-center text-gray-500">ไม่พบข้อมูลบุคลากร</td></tr>
                         ) : (
                             paginatedData.map((t) => (
                                 <tr key={getTeacherId(t) || t.citizenId} className="hover:bg-gray-50 transition-colors">
@@ -483,9 +520,28 @@ export default function Teachers() {
                                         </span>
                                     </td>
                                     <td className="p-4">
+                                        {t.lineUserId ? (
+                                            <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded-full font-bold">เชื่อมต่อแล้ว</span>
+                                        ) : (
+                                            <span className="text-xs text-gray-400">-</span>
+                                        )}
+                                    </td>
+                                    <td className="p-4">
                                         <div className="flex justify-center gap-2">
-                                            <button onClick={() => handleOpenEdit(t)} className="p-1.5 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded"><Edit size={18} /></button>
-                                            <button onClick={() => handleDelete(t)} className="p-1.5 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded"><Trash2 size={18} /></button>
+                                            <button onClick={() => handleOpenEdit(t)} title="แก้ไข" className="p-1.5 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded"><Edit size={18} /></button>
+                                            {t.lineUserId && (
+                                                <button
+                                                    onClick={() => void handleResetLineConnection(t)}
+                                                    title="รีเซ็ตการเชื่อมต่อบัญชี LINE"
+                                                    disabled={resettingLineUserId !== null}
+                                                    className="p-1.5 text-gray-500 hover:text-orange-600 hover:bg-orange-50 rounded disabled:cursor-not-allowed disabled:opacity-40"
+                                                >
+                                                    {resettingLineUserId === getTeacherId(t)
+                                                        ? <span className="block h-[18px] w-[18px] animate-spin rounded-full border-2 border-orange-200 border-t-orange-600" />
+                                                        : <Unlink size={18} />}
+                                                </button>
+                                            )}
+                                            <button onClick={() => handleDelete(t)} title="ลบ" className="p-1.5 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded"><Trash2 size={18} /></button>
                                         </div>
                                     </td>
                                 </tr>
@@ -493,6 +549,7 @@ export default function Teachers() {
                         )}
                     </tbody>
                 </table>
+                </div>
 
                 {/* Pagination Controls */}
                 <div className="p-4 border-t border-gray-100 flex items-center justify-between bg-gray-50/50">

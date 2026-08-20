@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import {
     Search, Plus, Upload, Edit, Trash2, X,
     ChevronLeft, ChevronRight, User, Eye, AlertTriangle, Shield, Award, Calendar,
-    Download, FileSpreadsheet, Info, CheckCircle2
+    Download, FileSpreadsheet, Info, CheckCircle2, Unlink
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import Swal from 'sweetalert2';
@@ -218,6 +218,7 @@ export default function Students() {
     const [students, setStudents] = useState<Student[]>([]);
     const [loading, setLoading] = useState(false);
     const [deletingStudentId, setDeletingStudentId] = useState<string | null>(null);
+    const [resettingLineUserId, setResettingLineUserId] = useState<string | null>(null);
 
     // --- Filter States ---
     const [selectedTermId, setSelectedTermId] = useState<string>('');
@@ -399,6 +400,33 @@ export default function Students() {
             toast.error(getErrorMessages(error, 'ลบข้อมูลไม่สำเร็จ')[0], { id: toastId });
         } finally {
             setDeletingStudentId(null);
+        }
+    };
+
+    const handleResetLineConnection = async (student: Student) => {
+        const name = `${student.firstName} ${student.lastName}`.trim();
+        const result = await Swal.fire({
+            title: 'รีเซ็ตการเชื่อมต่อ LINE?',
+            text: `บัญชีของ ${name} จะหยุดรับการแจ้งเตือน จนกว่าจะเชื่อมต่อบัญชี LINE ใหม่`,
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonColor: '#f97316',
+            confirmButtonText: 'รีเซ็ตการเชื่อมต่อ',
+            cancelButtonText: 'ยกเลิก'
+        });
+
+        if (!result.isConfirmed) return;
+
+        const toastId = toast.loading('กำลังรีเซ็ตการเชื่อมต่อ LINE...');
+        setResettingLineUserId(student.id);
+        try {
+            await api.patch(`/users/${student.id}`, { lineUserId: null });
+            toast.success('รีเซ็ตการเชื่อมต่อ LINE สำเร็จ', { id: toastId });
+            await fetchStudents(selectedClassroomId);
+        } catch (error) {
+            toast.error(getErrorMessages(error, 'ไม่สามารถรีเซ็ตการเชื่อมต่อ LINE ได้')[0], { id: toastId });
+        } finally {
+            setResettingLineUserId(null);
         }
     };
 
@@ -728,10 +756,22 @@ export default function Students() {
                                                         <button onClick={() => handleOpenEdit(s)} title="แก้ไข" className="p-1.5 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded">
                                                             <Edit size={18} />
                                                         </button>
+                                                        {s.lineUserId && (
+                                                            <button
+                                                                onClick={() => void handleResetLineConnection(s)}
+                                                                title="รีเซ็ตการเชื่อมต่อบัญชี LINE"
+                                                                disabled={resettingLineUserId !== null}
+                                                                className="p-1.5 text-gray-500 hover:text-orange-600 hover:bg-orange-50 rounded disabled:cursor-not-allowed disabled:opacity-40"
+                                                            >
+                                                                {resettingLineUserId === s.id
+                                                                    ? <span className="block h-[18px] w-[18px] animate-spin rounded-full border-2 border-orange-200 border-t-orange-600" />
+                                                                    : <Unlink size={18} />}
+                                                            </button>
+                                                        )}
                                                         <button
                                                             onClick={() => void handleDelete(s.id, `${s.firstName} ${s.lastName}`)}
                                                             title="ลบ"
-                                                            disabled={deletingStudentId !== null}
+                                                            disabled={deletingStudentId !== null || resettingLineUserId !== null}
                                                             className="p-1.5 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded disabled:cursor-not-allowed disabled:opacity-40"
                                                         >
                                                             {deletingStudentId === s.id
