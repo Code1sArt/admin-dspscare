@@ -1,3 +1,5 @@
+import AttendanceArchiveManagement from './pages/AttendanceArchiveManagement';
+import AttendanceArchiveReader from './pages/AttendanceArchiveReader';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast'; // <--- 1. Import Toaster
 import AdminLayout from './layouts/AdminLayout';
@@ -68,6 +70,8 @@ function App() {
           <Route path="parents" element={<Parents />} />
           <Route path="classrooms" element={<Classrooms />} />
           <Route path="point-categories" element={<PointCategories />} />
+          <Route path="attendance-archives" element={<AttendanceArchiveManagement />} />
+          <Route path="attendance-archive-reader" element={<AttendanceArchiveReader />} />
           <Route path="attendance-reports" element={<AttendanceReports />} />
           <Route path="attendance-editor" element={<AttendanceEditor />} />
           <Route path="settings" element={<Settings />} />

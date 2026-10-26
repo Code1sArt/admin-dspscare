@@ -1,5 +1,7 @@
 import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
 import {
+    Archive,
+    BookOpen,
     Bell,
     CalendarDays,
     ChevronRight,
@@ -68,6 +70,8 @@ const menuSections: MenuSection[] = [
     {
         title: 'ระบบ',
         items: [
+            { name: 'สำรอง / ล้างประวัติเช็คชื่อ', path: '/attendance-archives', icon: Archive },
+            { name: 'อ่านข้อมูลเช็คชื่อเก่า', path: '/attendance-archive-reader', icon: BookOpen },
             { name: 'ตั้งค่าระบบ', path: '/settings', icon: Settings }
         ]
     }
