@@ -1,4 +1,3 @@
-export const MAX_ARCHIVE_BYTES = 200 * 1024 * 1024;
 export const attendanceStatusLabels = {
     PRESENT: 'มาเรียน', ABSENT: 'ขาด', LATE: 'สาย', LEAVE: 'ลา', ACTIVITY: 'กิจกรรม'
 } as const;
@@ -19,13 +18,17 @@ export interface ArchiveRecord {
     term: { id: number; term: number; year: number };
 }
 
-export interface AttendanceArchive {
+export interface ArchiveSummary {
     format: 'dsps-attendance-archive';
-    version: 1;
+    version: 1 | 2;
     exportedAt: string;
     count: number;
     digest: string;
     receipt: string;
+    terms: { id: number; term: number; year: number }[];
+}
+
+export interface AttendanceArchive extends ArchiveSummary {
     records: ArchiveRecord[];
 }
 
@@ -48,6 +51,15 @@ function isRecord(value: unknown): value is ArchiveRecord {
         (value.classroom === null || (object(value.classroom) && value.classroom.id === value.classroomId && typeof value.classroom.name === 'string')) &&
         person(value.student) && object(value.student) && typeof value.student.citizenId === 'string' && value.student.id === value.studentId &&
         person(value.recorder) && object(value.recorder) && value.recorder.id === value.recorderId;
+}
+
+function receiptMatches(archive: ArchiveSummary) {
+    try {
+        const encoded = archive.receipt.split('.')[0].replace(/-/g, '+').replace(/_/g, '/');
+        const claims = decodeBase64Json(encoded.padEnd(Math.ceil(encoded.length / 4) * 4, '='));
+        return object(claims) && claims.version === archive.version && claims.count === archive.count &&
+            claims.digest === archive.digest && JSON.stringify(claims.termIds) === JSON.stringify(archive.terms.map(term => term.id).sort((a, b) => a - b));
+    } catch { return false; }
 }
 
 export async function parseAttendanceArchive(sql: string): Promise<AttendanceArchive> {
@@ -81,14 +93,156 @@ export async function parseAttendanceArchive(sql: string): Promise<AttendanceArc
     const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify(payload.records)));
     const digest = Array.from(new Uint8Array(hash), byte => byte.toString(16).padStart(2, '0')).join('');
     if (digest !== payload.digest) throw new Error('ข้อมูลในไฟล์ไม่ตรงกับรหัสตรวจสอบ กรุณาใช้ไฟล์สำรองที่สมบูรณ์');
-    return payload as unknown as AttendanceArchive;
+    const archive = { ...payload, terms: [...new Map(payload.records.map(record => [record.termId, record.term])).values()].sort((a, b) => a.id - b.id) } as unknown as AttendanceArchive;
+    if (!receiptMatches(archive)) throw new Error('หลักฐานการส่งออกไม่ตรงกับข้อมูลในไฟล์สำรอง');
+    return archive;
 }
 
-export async function readAttendanceArchive(file: File) {
-    if (!file.name.toLowerCase().endsWith('.sql')) throw new Error('กรุณาเลือกไฟล์ .sql');
-    if (file.size > MAX_ARCHIVE_BYTES) throw new Error('รองรับไฟล์ขนาดไม่เกิน 200 MB กรุณาส่งออกแยกภาคเรียน');
-    return parseAttendanceArchive(await file.text());
+type ReadOptions = { summaryOnly?: boolean; onProgress?: (percent: number) => void };
+const sha256 = async (value: unknown) => {
+    if (!globalThis.crypto?.subtle) throw new Error('กรุณาเปิดระบบผ่าน HTTPS เพื่อให้ตรวจสอบไฟล์สำรองได้');
+    const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify(value)));
+    return Array.from(new Uint8Array(hash), byte => byte.toString(16).padStart(2, '0')).join('');
+};
+const decodeBase64Json = (encoded: string): unknown => JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(Uint8Array.from(atob(encoded), char => char.charCodeAt(0))));
+const decodeHex = (hex: string) => {
+    if (hex.length % 2) throw new Error('ข้อมูล SQL ไม่สมบูรณ์');
+    const bytes = new Uint8Array(hex.length / 2);
+    for (let index = 0; index < bytes.length; index++) bytes[index] = parseInt(hex.slice(index * 2, index * 2 + 2), 16);
+    return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+};
+
+// Never expand the whole SQL or gzip into a JavaScript string. Each generated
+// INSERT is one line, and only 1,000 records are held for integrity checks.
+async function* sqlLines(stream: ReadableStream<Uint8Array>) {
+    const reader = stream.getReader();
+    const decoder = new TextDecoder('utf-8', { fatal: true });
+    let pending = '';
+    try {
+        while (true) {
+            const { done, value } = await reader.read();
+            pending += done ? decoder.decode() : decoder.decode(value, { stream: true });
+            const parts = pending.split('\n');
+            pending = parts.pop()!;
+            for (const line of parts) yield line.replace(/\r$/, '');
+            if (pending.length > 4 * 1024 * 1024) throw new Error('บรรทัดข้อมูลในไฟล์ SQL ไม่ถูกต้อง');
+            if (done) break;
+        }
+        if (pending) yield pending.replace(/\r$/, '');
+    } finally {
+        await reader.cancel().catch(() => undefined);
+        reader.releaseLock();
+    }
 }
+
+async function readV2(lines: AsyncGenerator<string>, options: ReadOptions): Promise<AttendanceArchive> {
+    const records: ArchiveRecord[] = [];
+    let batch: ArchiveRecord[] = [];
+    const chunks: { count: number; digest: string }[] = [];
+    const terms = new Map<number, ArchiveRecord['term']>();
+    const ids = new Set<string>();
+    let count = 0;
+    let started = false;
+    let committed = false;
+    let manifest: ArchiveSummary | undefined;
+    let shortBatch = false;
+    for await (const line of lines) {
+        if (!line.trim()) continue;
+        if (manifest) throw new Error('พบข้อมูลเกินหลังจบไฟล์สำรอง');
+        if (line === 'START TRANSACTION;' && !started) { started = true; continue; }
+        if (line === 'COMMIT;' && started && !committed && batch.length === 0) { committed = true; continue; }
+        if (line.startsWith('-- DSPS_ARCHIVE_V2_END ')) {
+            const value = decodeBase64Json(line.slice('-- DSPS_ARCHIVE_V2_END '.length));
+            const expectedTerms = [...terms.values()].sort((a, b) => a.id - b.id);
+            if (!committed || !object(value) || value.format !== 'dsps-attendance-archive' || value.version !== 2 ||
+                !isoDate(value.exportedAt) || !integer(value.count) || value.count !== count ||
+                typeof value.digest !== 'string' || value.digest !== await sha256(chunks) ||
+                value.chunks !== chunks.length || !chunks.length ||
+                typeof value.receipt !== 'string' || !/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(value.receipt) ||
+                JSON.stringify(value.terms) !== JSON.stringify(expectedTerms)) throw new Error('ข้อมูลสำรองไม่ครบหรือรหัสตรวจสอบไม่ตรงกัน');
+            manifest = value as unknown as ArchiveSummary;
+            continue;
+        }
+        if (committed) throw new Error('ส่วนท้ายไฟล์ SQL ไม่ถูกต้อง');
+        const marker = line.match(/^-- DSPS_ARCHIVE_BATCH ([1-9]\d{0,3}) ([a-f0-9]{64})$/);
+        if (marker) {
+            if (!started || !batch.length || Number(marker[1]) !== batch.length || marker[2] !== await sha256(batch)) throw new Error('ข้อมูลในไฟล์ไม่ตรงกับรหัสตรวจสอบ');
+            chunks.push({ count: batch.length, digest: marker[2] });
+            count += batch.length;
+            shortBatch = batch.length < 1000;
+            batch = [];
+            continue;
+        }
+        const row = line.match(/^INSERT INTO `DSPSAttendanceArchive_v1` \(`id`, `recordJson`\) VALUES \(CONVERT\(X'([a-f0-9]+)' USING utf8mb4\), CONVERT\(X'([a-f0-9]+)' USING utf8mb4\)\);$/);
+        if (row) {
+            if (!started || shortBatch || batch.length >= 1000) throw new Error('ลำดับข้อมูลสำรองไม่ถูกต้อง');
+            const record: unknown = JSON.parse(decodeHex(row[2]));
+            if (!isRecord(record) || record.id !== decodeHex(row[1]) || ids.has(record.id)) throw new Error('โครงสร้างข้อมูลสำรองไม่ถูกต้องหรือมีรายการซ้ำ');
+            ids.add(record.id);
+            const previousTerm = terms.get(record.termId);
+            if (previousTerm && JSON.stringify(previousTerm) !== JSON.stringify(record.term)) throw new Error('ข้อมูลภาคเรียนในไฟล์ไม่ตรงกัน');
+            terms.set(record.termId, record.term);
+            batch.push(record);
+            if (!options.summaryOnly) records.push(record);
+            continue;
+        }
+        // Only the fixed, harmless preamble is accepted; SQL is never executed.
+        if (!started && (line === '-- Historical snapshots only. Does not modify live attendance or scores.' ||
+            line === 'SET NAMES utf8mb4;' || line === 'CREATE TABLE IF NOT EXISTS `DSPSAttendanceArchive_v1` (`id` VARCHAR(191) NOT NULL PRIMARY KEY, `recordJson` LONGTEXT NOT NULL) CHARACTER SET utf8mb4;')) continue;
+        throw new Error('รูปแบบไฟล์ SQL ไม่ถูกต้อง');
+    }
+    if (!manifest || batch.length) throw new Error('ไฟล์สำรองไม่ครบ ดาวน์โหลดอาจถูกขัดจังหวะ กรุณาส่งออกใหม่');
+    if (!receiptMatches(manifest)) throw new Error('หลักฐานการส่งออกไม่ตรงกับข้อมูลในไฟล์สำรอง');
+    return { ...manifest, records };
+}
+
+export function readAttendanceArchive(file: File, options: ReadOptions & { summaryOnly: true }): Promise<ArchiveSummary>;
+export function readAttendanceArchive(file: File, options?: ReadOptions & { summaryOnly?: false }): Promise<AttendanceArchive>;
+export async function readAttendanceArchive(file: File, options: ReadOptions = {}): Promise<AttendanceArchive | ArchiveSummary> {
+    if (!/\.sql(?:\.gz)?$/i.test(file.name)) throw new Error('กรุณาเลือกไฟล์ .sql หรือ .sql.gz');
+    const signature = new Uint8Array(await file.slice(0, 2).arrayBuffer());
+    const gzip = signature[0] === 0x1f && signature[1] === 0x8b;
+    if (/\.gz$/i.test(file.name) && !gzip) throw new Error('ไฟล์ .sql.gz ไม่ใช่ข้อมูล gzip ที่สมบูรณ์');
+    let readBytes = 0;
+    let lastPercent = -1;
+    let stream = file.stream().pipeThrough(new TransformStream<Uint8Array<ArrayBuffer>, Uint8Array<ArrayBuffer>>({
+        transform(value, controller) {
+            readBytes += value.byteLength;
+            const percent = Math.floor(readBytes / Math.max(1, file.size) * 100);
+            if (percent !== lastPercent) { lastPercent = percent; options.onProgress?.(percent); }
+            controller.enqueue(value);
+        }
+    }));
+    if (gzip) {
+        if (typeof DecompressionStream === 'undefined') throw new Error('เบราว์เซอร์นี้ยังไม่รองรับไฟล์บีบอัด กรุณาอัปเดตเบราว์เซอร์หรือแตกไฟล์ .gz ก่อนเลือกไฟล์ .sql');
+        stream = stream.pipeThrough(new DecompressionStream('gzip'));
+    }
+    const lines = sqlLines(stream);
+    const first = await lines.next();
+    try {
+        let archive: AttendanceArchive;
+        if (first.value === '-- DSPS CARE attendance archive v2 (MySQL / MariaDB, UTF-8)') {
+            archive = await readV2(lines, options);
+        } else {
+            // Legacy v1 files remain readable. New exports use streaming v2.
+            const legacy = [first.value ?? ''];
+            for await (const line of lines) legacy.push(line);
+            archive = await parseAttendanceArchive(legacy.join('\n'));
+        }
+        options.onProgress?.(100);
+        if (options.summaryOnly) {
+            return { format: archive.format, version: archive.version, exportedAt: archive.exportedAt, count: archive.count, digest: archive.digest, receipt: archive.receipt, terms: archive.terms };
+        }
+        return archive;
+    } finally { await lines.return(undefined); }
+}
+
+export const archiveDownloadErrorMessage = async (error: unknown, fallback: string) => {
+    if (object(error) && object(error.response) && error.response.data instanceof Blob && error.response.data.size < 1024 * 1024) {
+        return archiveErrorMessage({ response: { data: await error.response.data.text() } }, fallback);
+    }
+    return archiveErrorMessage(error, fallback);
+};
 
 export const archiveErrorMessage = (error: unknown, fallback: string) => {
     if (object(error) && object(error.response)) {

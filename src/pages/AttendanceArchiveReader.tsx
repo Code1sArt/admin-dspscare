@@ -9,6 +9,7 @@ const PAGE_SIZE = 50;
 export default function AttendanceArchiveReader() {
     const [archive, setArchive] = useState<AttendanceArchive | null>(null);
     const [filename, setFilename] = useState('');
+    const [progress, setProgress] = useState(0);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
     const [query, setQuery] = useState('');
@@ -26,13 +27,14 @@ export default function AttendanceArchiveReader() {
     };
     const openFile = async (file?: File) => {
         if (!file) return;
-        setLoading(true); setError(''); setArchive(null); setFilename(''); resetFilters();
+        setLoading(true); setProgress(0); setError(''); setArchive(null); setFilename(''); resetFilters();
         try {
-            const nextArchive = await readAttendanceArchive(file);
+            const nextArchive = await readAttendanceArchive(file, { onProgress: setProgress });
             setArchive(nextArchive); setFilename(file.name);
             toast.success('เปิดข้อมูลย้อนหลังแล้ว');
         } catch (cause) {
             setError(archiveErrorMessage(cause, 'เปิดไฟล์ไม่สำเร็จ'));
+            if (inputRef.current) inputRef.current.value = '';
         } finally { setLoading(false); }
     };
     const closeFile = () => {
@@ -40,32 +42,37 @@ export default function AttendanceArchiveReader() {
         if (inputRef.current) inputRef.current.value = '';
     };
 
-    const { terms, classrooms, rows } = useMemo(() => {
-        const records = archive?.records ?? [];
-        return {
-            terms: [...new Map(records.map(record => [record.termId, record.term])).values()].sort((a, b) => b.year - a.year || b.term - a.term),
-            classrooms: [...new Map(records.filter(record => !termId || String(record.termId) === termId).map(record => [String(record.classroomId ?? 'unknown'), record.classroom?.name ?? 'ไม่ระบุห้อง ณ วันบันทึก'])).entries()].sort((a, b) => a[1].localeCompare(b[1], 'th', { numeric: true })),
-            rows: records.map(record => ({ record, day: archiveDay(record.date), search: `${record.student.citizenId} ${record.student.firstName} ${record.student.lastName} ${record.recorder.firstName} ${record.recorder.lastName}`.toLocaleLowerCase('th') }))
-        };
+    const sortedRecords = useMemo(() => [...(archive?.records ?? [])].sort((a, b) => b.date.localeCompare(a.date) || a.student.firstName.localeCompare(b.student.firstName, 'th')), [archive]);
+    const terms = archive?.terms ?? [];
+    const classrooms = useMemo(() => {
+        const rooms = new Map<string, string>();
+        for (const record of archive?.records ?? []) {
+            if (!termId || String(record.termId) === termId) rooms.set(String(record.classroomId ?? 'unknown'), record.classroom?.name ?? 'ไม่ระบุห้อง ณ วันบันทึก');
+        }
+        return [...rooms.entries()].sort((a, b) => a[1].localeCompare(b[1], 'th', { numeric: true }));
     }, [archive, termId]);
 
     const invalidRange = !!startDate && !!endDate && startDate > endDate;
     const filtered = useMemo(() => {
         if (invalidRange) return [];
         const search = query.trim().toLocaleLowerCase('th');
-        return rows.filter(({ record, day, search: text }) =>
-            (!search || text.includes(search)) && (!termId || String(record.termId) === termId) &&
-            (!classroomId || String(record.classroomId ?? 'unknown') === classroomId) &&
-            (!type || record.type === type) && (!status || record.status === status) &&
-            (!startDate || day >= startDate) && (!endDate || day <= endDate)
-        ).sort((a, b) => b.record.date.localeCompare(a.record.date) || a.record.student.firstName.localeCompare(b.record.student.firstName, 'th'));
-    }, [rows, query, termId, classroomId, type, status, startDate, endDate, invalidRange]);
+        return sortedRecords.filter(record => {
+            if ((termId && String(record.termId) !== termId) ||
+                (classroomId && String(record.classroomId ?? 'unknown') !== classroomId) ||
+                (type && record.type !== type) || (status && record.status !== status)) return false;
+            if (startDate || endDate) {
+                const day = archiveDay(record.date);
+                if ((startDate && day < startDate) || (endDate && day > endDate)) return false;
+            }
+            return !search || `${record.student.citizenId} ${record.student.firstName} ${record.student.lastName} ${record.recorder.firstName} ${record.recorder.lastName}`.toLocaleLowerCase('th').includes(search);
+        });
+    }, [sortedRecords, query, termId, classroomId, type, status, startDate, endDate, invalidRange]);
     const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
     const currentPage = Math.min(page, pageCount);
     const visible = filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
     const counts = useMemo(() => {
         const result = { PRESENT: 0, ABSENT: 0, LATE: 0, LEAVE: 0, ACTIVITY: 0 };
-        filtered.forEach(({ record }) => result[record.status]++);
+        filtered.forEach(record => result[record.status]++);
         return result;
     }, [filtered]);
     const inputClass = 'w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm';
@@ -76,10 +83,10 @@ export default function AttendanceArchiveReader() {
             <p className="mt-2 text-gray-500">เปิดไฟล์ SQL จากเมนูสำรองประวัติเพื่อค้นหาและดูข้อมูลย้อนหลัง</p>
         </header>
         <section className="space-y-4 rounded-xl border border-gray-100 bg-white p-6 shadow-sm">
-            <p className="text-sm leading-7 text-gray-600">อ่านไฟล์ในเบราว์เซอร์ ไม่มีการนำข้อมูลกลับเข้า DB และไม่เปลี่ยนคะแนน รองรับไฟล์ .sql ที่ส่งออกจากเมนูสำรองประวัติของระบบนี้ ขนาดไม่เกิน 200 MB</p>
+            <p className="text-sm leading-7 text-gray-600">อ่านไฟล์ .sql.gz และ .sql ที่ส่งออกจากระบบในเบราว์เซอร์ โดยไม่เพิ่มข้อมูลกลับเข้า DB หรือเปลี่ยนคะแนน ไฟล์รุ่นใหม่อ่านและตรวจสอบทีละส่วน รองรับข้อมูลที่ใหญ่กว่า 200 MB</p>
             <label className="flex items-center gap-2 text-sm font-bold text-gray-700" htmlFor="historical-sql"><FileUp size={18} /> เลือกไฟล์ประวัติ</label>
-            <input id="historical-sql" ref={inputRef} type="file" accept=".sql" disabled={loading} onChange={event => void openFile(event.target.files?.[0])} className="block w-full text-sm file:mr-4 file:rounded-lg file:border-0 file:bg-green-50 file:px-4 file:py-2 file:font-bold file:text-primary" />
-            {loading && <p role="status" className="text-sm text-gray-500">กำลังอ่านและตรวจสอบไฟล์...</p>}
+            <input id="historical-sql" ref={inputRef} type="file" accept=".sql,.sql.gz,.gz" disabled={loading} onChange={event => void openFile(event.target.files?.[0])} className="block w-full text-sm file:mr-4 file:rounded-lg file:border-0 file:bg-green-50 file:px-4 file:py-2 file:font-bold file:text-primary" />
+            {loading && <p role="status" className="text-sm text-gray-500">กำลังอ่านและตรวจสอบไฟล์ {progress}%...</p>}
             {error && <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{error}</p>}
             {archive && <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-green-50 p-4 text-sm text-green-900">
                 <div className="min-w-0"><p className="break-all font-bold">{filename}</p><p className="mt-1">ทั้งหมด {archive.count.toLocaleString('th-TH')} รายการ · ส่งออก {archiveDate(archive.exportedAt)}</p></div>
@@ -105,7 +112,7 @@ export default function AttendanceArchiveReader() {
                 <div className="border-b border-gray-100 p-4 text-sm text-gray-600">พบ {filtered.length.toLocaleString('th-TH')} รายการตามตัวกรอง · นับแยกตามประเภทการเช็คชื่อ · เวลาไทย</div>
                 <div className="overflow-x-auto"><table className="w-full text-left text-sm">
                     <thead className="bg-gray-50 text-gray-500"><tr>{['วันที่ / เวลา', 'นักเรียน', 'ห้อง / ภาคเรียน', 'ประเภท', 'สถานะ', 'ผู้บันทึก'].map(label => <th key={label} className="whitespace-nowrap px-5 py-4 font-medium">{label}</th>)}</tr></thead>
-                    <tbody className="divide-y divide-gray-100">{visible.length ? visible.map(({ record }) => <tr key={record.id} className="hover:bg-gray-50">
+                    <tbody className="divide-y divide-gray-100">{visible.length ? visible.map(record => <tr key={record.id} className="hover:bg-gray-50">
                         <td className="whitespace-nowrap px-5 py-4">{archiveDate(record.date)}</td>
                         <td className="px-5 py-4"><p className="font-medium text-gray-800">{record.student.firstName} {record.student.lastName}</p><p className="mt-1 text-xs text-gray-500">{record.student.citizenId}</p></td>
                         <td className="px-5 py-4"><p>{record.classroom?.name ?? 'ไม่ระบุห้อง ณ วันบันทึก'}</p><p className="mt-1 text-xs text-gray-500">{record.term.term}/{record.term.year}</p></td>

@@ -8,7 +8,8 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "test:attendance-archive": "node --test scripts/test-attendance-archive.mjs"
+    "test:attendance-archive": "node --test scripts/test-attendance-archive.mjs",
+    "test:attendance-archive:large": "node scripts/test-attendance-archive-large.mjs"
   },
   "dependencies": {
     "@headlessui/react": "^2.2.10",
