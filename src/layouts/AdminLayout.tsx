@@ -12,6 +12,7 @@ import {
     Home,
     ListChecks,
     LogOut,
+    Megaphone,
     Settings,
     ShieldCheck,
     Sparkles,
@@ -59,6 +60,7 @@ const menuSections: MenuSection[] = [
     {
         title: 'งานกิจการนักเรียน',
         items: [
+            { name: 'Broadcast ข้อความ', path: '/broadcast', icon: Megaphone },
             { name: 'ประเภทคะแนน', path: '/point-categories', icon: ListChecks },
             { name: 'คะแนนพฤติกรรม', path: '/behavior-points', icon: ShieldCheck },
             { name: 'รายงานการเช็คชื่อ', path: '/attendance-reports', icon: ClipboardCheck },
