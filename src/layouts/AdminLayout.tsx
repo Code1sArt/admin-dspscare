@@ -1,6 +1,7 @@
 import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
 import {
     Archive,
+    Camera,
     BookOpen,
     Bell,
     CalendarDays,
@@ -60,6 +61,7 @@ const menuSections: MenuSection[] = [
     {
         title: 'งานกิจการนักเรียน',
         items: [
+            { name: 'ระบบจองช่างภาพ', path: '/photography', icon: Camera },
             { name: 'Broadcast ข้อความ', path: '/broadcast', icon: Megaphone },
             { name: 'ประเภทคะแนน', path: '/point-categories', icon: ListChecks },
             { name: 'คะแนนพฤติกรรม', path: '/behavior-points', icon: ShieldCheck },

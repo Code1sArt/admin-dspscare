@@ -1,3 +1,4 @@
+import PhotographyPage from './pages/PhotographyPage';
 import AttendanceArchiveManagement from './pages/AttendanceArchiveManagement';
 import AttendanceArchiveReader from './pages/AttendanceArchiveReader';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
@@ -83,6 +84,7 @@ function App() {
           <Route path="promotions" element={<Promotions />} />
           <Route path="student-enrollment-changes" element={<StudentEnrollmentChanges />} />
           <Route path="inactive-students" element={<InactiveStudents />} />
+          <Route path="photography" element={<PhotographyPage />} />
           <Route path="broadcast" element={<Broadcast />} />
         </Route>
       </Routes>
