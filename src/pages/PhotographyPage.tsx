@@ -18,6 +18,7 @@ import {
   ChevronRight,
 } from "lucide-react";
 import toast from "react-hot-toast";
+import PhotographyDateTimePicker from "../components/PhotographyDateTimePicker";
 import api from "../services/api";
 
 type Person = {
@@ -981,9 +982,21 @@ function BookingForm({
   const [count, setCount] = useState(1);
   const [slots, setSlots] = useState([{ startsAt: "", endsAt: "" }]);
   const [equipment, setEquipment] = useState<Record<string, number>>({});
-  // datetime-local values are explicitly Bangkok times regardless of the device timezone.
+  // Calendar and clock values are Bangkok times regardless of the device timezone.
   async function submit(e: FormEvent) {
     e.preventDefault();
+    if (
+      slots.some((s) =>
+        [s.startsAt, s.endsAt].some(
+          (at) =>
+            !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(at) ||
+            !Number.isFinite(new Date(`${at}:00+07:00`).getTime()),
+        ),
+      )
+    ) {
+      toast.error("กรุณาเลือกวันและเวลาให้ครบทุกช่วง");
+      return;
+    }
     const ranges = slots.map((s) => ({
       startsAt: new Date(`${s.startsAt}:00+07:00`).toISOString(),
       endsAt: new Date(`${s.endsAt}:00+07:00`).toISOString(),
@@ -1083,36 +1096,39 @@ function BookingForm({
                   </button>
                 )}
               </div>
-              <Label title="เริ่ม">
-                <input
-                  required
-                  type="datetime-local"
-                  value={slot.startsAt}
-                  onChange={(e) =>
-                    setSlots(
-                      slots.map((s, index) =>
-                        index === i ? { ...s, startsAt: e.target.value } : s,
-                      ),
-                    )
-                  }
-                  className={field}
-                />
-              </Label>
-              <Label title="สิ้นสุด">
-                <input
-                  required
-                  type="datetime-local"
-                  value={slot.endsAt}
-                  onChange={(e) =>
-                    setSlots(
-                      slots.map((s, index) =>
-                        index === i ? { ...s, endsAt: e.target.value } : s,
-                      ),
-                    )
-                  }
-                  className={field}
-                />
-              </Label>
+              <PhotographyDateTimePicker
+                label="เริ่ม"
+                value={slot.startsAt}
+                defaultTime="09:00"
+                initiallyOpen
+                kind={borrow ? "EQUIPMENT" : "PHOTOGRAPHERS"}
+                onChange={(value) =>
+                  setSlots(
+                    slots.map((s, index) =>
+                      index === i
+                        ? {
+                            ...s,
+                            startsAt: value,
+                            endsAt: s.endsAt || `${value.slice(0, 10)}T10:00`,
+                          }
+                        : s,
+                    ),
+                  )
+                }
+              />
+              <PhotographyDateTimePicker
+                label="สิ้นสุด"
+                value={slot.endsAt}
+                defaultTime="10:00"
+                kind={borrow ? "EQUIPMENT" : "PHOTOGRAPHERS"}
+                onChange={(value) =>
+                  setSlots(
+                    slots.map((s, index) =>
+                      index === i ? { ...s, endsAt: value } : s,
+                    ),
+                  )
+                }
+              />
             </div>
           ))}
           <button
