@@ -287,6 +287,21 @@ export default function PhotographyPage() {
     detailVersion.current++;
     setSelected(null);
   };
+  async function deleteBooking() {
+    if (busy || !selected || meta?.role !== "ADMIN") return;
+    if (
+      !window.confirm(
+        `ลบการจอง “${selected.activityName}” ถาวร?\nรายการจอง ช่วงเวลา และการมอบหมายช่างภาพ/อุปกรณ์จะถูกลบ และไม่สามารถกู้คืนได้`,
+      )
+    )
+      return;
+    const id = selected.id;
+    if (await perform(() => api.delete(`/photography/bookings/${id}`))) {
+      detailVersion.current++;
+      setSelected(null);
+      if (items.length === 1 && page > 1) setPage(page - 1);
+    }
+  }
 
   return (
     <div className="mx-auto max-w-5xl space-y-5 p-4 pb-28 text-gray-800 lg:p-6">
@@ -925,6 +940,21 @@ export default function PhotographyPage() {
                   </button>
                 </section>
               )}
+            {meta.role === "ADMIN" && (
+              <section className="space-y-3 border-t pt-4">
+                <p className="text-gray-500">
+                  ผู้ดูแลระบบสามารถลบรายการจองนี้ถาวรได้ทุกสถานะ
+                </p>
+                <button
+                  type="button"
+                  disabled={busy}
+                  className="rounded-xl bg-rose-700 px-4 py-3 font-bold text-white disabled:opacity-50"
+                  onClick={() => void deleteBooking()}
+                >
+                  ลบการจองถาวร
+                </button>
+              </section>
+            )}
           </div>
         </Modal>
       )}
