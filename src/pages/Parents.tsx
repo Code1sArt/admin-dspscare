@@ -1,12 +1,13 @@
 import { useState, useEffect, useMemo, Fragment } from 'react';
 import {
     Search, UserPlus, Trash2, ChevronLeft, ChevronRight,
-    Users, Check, ChevronsUpDown, UserCog, PlusCircle
+    Users, Check, ChevronsUpDown, UserCog, PlusCircle, KeyRound
 } from 'lucide-react';
 import { Combobox, Dialog, Transition } from '@headlessui/react';
 import toast from 'react-hot-toast';
 import Swal from 'sweetalert2';
 import api from '../services/api';
+import ParentLinkInvitationDialog from '../components/ParentLinkInvitationDialog';
 
 // --- Types ---
 interface Child {
@@ -53,6 +54,7 @@ export default function AdminParentManagement() {
     // Modals State
     const [isRegisterModalOpen, setIsRegisterModalOpen] = useState(false);
     const [isAddChildModalOpen, setIsAddChildModalOpen] = useState(false);
+    const [isInvitationModalOpen, setIsInvitationModalOpen] = useState(false);
 
     // Form State
     const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
@@ -221,13 +223,24 @@ export default function AdminParentManagement() {
                     </h1>
                     <p className="text-gray-500 text-sm">ดูรายชื่อผู้ปกครอง เพิ่มนักเรียนในความดูแล และลบบัญชี</p>
                 </div>
-                <button
-                    onClick={() => { resetForms(); setIsRegisterModalOpen(true); }}
-                    className="flex items-center justify-center gap-2 bg-primary hover:bg-primary-dark text-white px-5 py-2.5 rounded-lg font-bold shadow-md transition-all active:scale-95"
-                >
-                    <UserPlus size={20} /> ลงทะเบียนผู้ปกครอง
-                </button>
+                <div className="flex flex-col gap-2 sm:flex-row">
+                    <button
+                        type="button"
+                        onClick={() => setIsInvitationModalOpen(true)}
+                        className="flex items-center justify-center gap-2 rounded-lg border border-primary/20 bg-white px-5 py-2.5 font-bold text-primary transition-colors hover:bg-primary/5"
+                    >
+                        <KeyRound size={20} /> ออกรหัสเชื่อมโยง
+                    </button>
+                    <button
+                        onClick={() => { resetForms(); setIsRegisterModalOpen(true); }}
+                        className="flex items-center justify-center gap-2 bg-primary hover:bg-primary-dark text-white px-5 py-2.5 rounded-lg font-bold shadow-md transition-all active:scale-95"
+                    >
+                        <UserPlus size={20} /> ลงทะเบียนผู้ปกครอง
+                    </button>
+                </div>
             </div>
+
+            {isInvitationModalOpen && <ParentLinkInvitationDialog onClose={() => setIsInvitationModalOpen(false)} />}
 
             {/* Filter / Search */}
             <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 flex items-center gap-4">
