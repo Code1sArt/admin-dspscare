@@ -15,7 +15,7 @@ interface Teacher {
     citizenId: string;
     firstName: string;
     lastName: string;
-    role: 'ADMIN' | 'TEACHER' | 'AFFAIRS';
+    role: 'ADMIN' | 'TEACHER' | 'AFFAIRS' | 'EXECUTIVE';
     lineUserId: string | null;
 }
 
@@ -298,7 +298,7 @@ export default function Teachers() {
                         citizenId, firstName, lastName, role
                     </code>
                     <p style="margin-top:8px; color:#6b7280">
-                        role ใช้ได้เฉพาะ <b>TEACHER</b>, <b>AFFAIRS</b>, <b>ADMIN</b>
+                        role ใช้ได้เฉพาะ <b>TEACHER</b>, <b>AFFAIRS</b>, <b>EXECUTIVE</b>, <b>ADMIN</b>
                     </p>
                 </div>
             `,
@@ -360,6 +360,12 @@ export default function Teachers() {
             },
             {
                 citizenId: '1101700000003',
+                firstName: 'ผู้บริหาร',
+                lastName: 'โรงเรียน',
+                role: 'EXECUTIVE'
+            },
+            {
+                citizenId: '1101700000004',
                 firstName: 'ผู้ดูแล',
                 lastName: 'ระบบ',
                 role: 'ADMIN'
@@ -371,7 +377,7 @@ export default function Teachers() {
             ['1. ใช้ชีตชื่อ staff_template หรือชีตแรกของไฟล์สำหรับข้อมูลนำเข้า'],
             ['2. ห้ามเปลี่ยนชื่อหัวคอลัมน์: citizenId, firstName, lastName, role'],
             ['3. citizenId คือรหัสบัตรประชาชน/Username ควรเก็บเป็นข้อความเพื่อไม่ให้เลข 0 ด้านหน้าหาย'],
-            ['4. role ใช้ได้เฉพาะ TEACHER, AFFAIRS, ADMIN'],
+            ['4. role ใช้ได้เฉพาะ TEACHER, AFFAIRS, EXECUTIVE, ADMIN'],
             ['5. ลบแถวตัวอย่างออกก่อนนำเข้าข้อมูลจริง หากไม่ต้องการนำเข้าข้อมูลตัวอย่าง']
         ];
 
@@ -397,7 +403,7 @@ export default function Teachers() {
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div>
                     <h1 className="text-2xl font-bold text-gray-800">จัดการบุคลากร</h1>
-                    <p className="text-gray-500">จัดการสิทธิ์การใช้งานสำหรับ ครู ฝ่ายกิจการ และผู้ดูแลระบบ</p>
+                    <p className="text-gray-500">จัดการสิทธิ์การใช้งานสำหรับ ครู ฝ่ายกิจการ ผู้บริหาร และผู้ดูแลระบบ</p>
                 </div>
                 <div className="flex flex-col gap-2 sm:flex-row">
                     <button onClick={handleDownloadTemplate} className="flex items-center justify-center gap-2 border border-primary/20 bg-white hover:bg-primary/5 text-primary px-4 py-2 rounded-lg font-bold transition-colors">
@@ -445,7 +451,7 @@ export default function Teachers() {
                         </li>
                         <li className="flex gap-2">
                             <CheckCircle2 className="mt-0.5 shrink-0 text-primary" size={16} />
-                            role ต้องเป็น TEACHER, AFFAIRS หรือ ADMIN
+                            role ต้องเป็น TEACHER, AFFAIRS, EXECUTIVE หรือ ADMIN
                         </li>
                         <li className="flex gap-2">
                             <CheckCircle2 className="mt-0.5 shrink-0 text-primary" size={16} />
@@ -477,6 +483,7 @@ export default function Teachers() {
                         <option value="ALL">ทุกระดับสิทธิ์</option>
                         <option value="TEACHER">ครู/ที่ปรึกษา</option>
                         <option value="AFFAIRS">ฝ่ายกิจการ</option>
+                        <option value="EXECUTIVE">ผู้บริหาร</option>
                         <option value="ADMIN">ผู้ดูแลระบบ</option>
                     </select>
                 </div>
@@ -514,9 +521,10 @@ export default function Teachers() {
                                     <td className="p-4 text-gray-600 font-mono text-sm">{t.citizenId}</td>
                                     <td className="p-4">
                                         <span className={`px-2.5 py-1 rounded-full text-xs font-bold ${t.role === 'ADMIN' ? 'bg-red-100 text-red-700' :
+                                                t.role === 'EXECUTIVE' ? 'bg-amber-100 text-amber-700' :
                                                 t.role === 'AFFAIRS' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'
                                             }`}>
-                                            {t.role === 'ADMIN' ? 'ผู้ดูแลระบบ' : t.role === 'AFFAIRS' ? 'ฝ่ายกิจการ' : 'ครู/ที่ปรึกษา'}
+                                            {t.role === 'ADMIN' ? 'ผู้ดูแลระบบ' : t.role === 'EXECUTIVE' ? 'ผู้บริหาร' : t.role === 'AFFAIRS' ? 'ฝ่ายกิจการ' : 'ครู/ที่ปรึกษา'}
                                         </span>
                                     </td>
                                     <td className="p-4">
@@ -625,6 +633,7 @@ export default function Teachers() {
                                 >
                                     <option value="TEACHER">TEACHER (ครูที่ปรึกษา)</option>
                                     <option value="AFFAIRS">AFFAIRS (ฝ่ายกิจการนักเรียน)</option>
+                                    <option value="EXECUTIVE">EXECUTIVE (ผู้บริหาร)</option>
                                     <option value="ADMIN">ADMIN (ผู้ดูแลระบบสูงสุด)</option>
                                 </select>
                                 {modalMode === 'EDIT' && editId === currentUserId && (

@@ -47,11 +47,11 @@ interface Teacher {
     id: string;
     firstName: string;
     lastName: string;
-    role: 'ADMIN' | 'TEACHER' | 'AFFAIRS';
+    role: 'ADMIN' | 'TEACHER' | 'AFFAIRS' | 'EXECUTIVE';
     lineUserId: string | null;
 }
 
-type UserRole = 'ADMIN' | 'TEACHER' | 'AFFAIRS' | 'STUDENT' | 'PARENT';
+type UserRole = 'ADMIN' | 'TEACHER' | 'AFFAIRS' | 'EXECUTIVE' | 'STUDENT' | 'PARENT';
 
 interface LinkedLineUser {
     id: string;
@@ -182,19 +182,22 @@ const percent = (value: number, total: number) => {
 const roleLabel: Record<Teacher['role'], string> = {
     ADMIN: 'ผู้ดูแลระบบ',
     TEACHER: 'ครู',
-    AFFAIRS: 'ฝ่ายกิจการ'
+    AFFAIRS: 'ฝ่ายกิจการ',
+    EXECUTIVE: 'ผู้บริหาร'
 };
 
 const roleColor: Record<Teacher['role'], string> = {
     ADMIN: 'bg-[#063d1f] text-secondary',
     TEACHER: 'bg-primary/10 text-primary',
-    AFFAIRS: 'bg-secondary/30 text-[#7a5f00]'
+    AFFAIRS: 'bg-secondary/30 text-[#7a5f00]',
+    EXECUTIVE: 'bg-amber-100 text-amber-700'
 };
 
 const lineRoleLabel: Record<UserRole, string> = {
     ADMIN: 'ผู้ดูแลระบบ',
     TEACHER: 'ครู',
     AFFAIRS: 'ฝ่ายกิจการ',
+    EXECUTIVE: 'ผู้บริหาร',
     STUDENT: 'นักเรียน',
     PARENT: 'ผู้ปกครอง'
 };
@@ -323,7 +326,7 @@ export default function Dashboard() {
                 ...counts,
                 [teacher.role]: counts[teacher.role] + 1
             }),
-            { ADMIN: 0, TEACHER: 0, AFFAIRS: 0 }
+            { ADMIN: 0, TEACHER: 0, AFFAIRS: 0, EXECUTIVE: 0 }
         );
     }, [teachers]);
 
@@ -742,7 +745,7 @@ export default function Dashboard() {
                             บุคลากรตามบทบาท
                         </h2>
                         <div className="mt-5 space-y-3">
-                            {(['TEACHER', 'AFFAIRS', 'ADMIN'] as Teacher['role'][]).map(role => (
+                            {(['TEACHER', 'AFFAIRS', 'EXECUTIVE', 'ADMIN'] as Teacher['role'][]).map(role => (
                                 <div key={role} className="flex items-center justify-between rounded-2xl border border-gray-100 p-4">
                                     <span className={`rounded-full px-3 py-1 text-xs font-bold ${roleColor[role]}`}>
                                         {roleLabel[role]}
