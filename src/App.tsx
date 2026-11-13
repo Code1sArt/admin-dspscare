@@ -23,6 +23,7 @@ import Promotions from './pages/Promotions';
 import StudentEnrollmentChanges from './pages/StudentEnrollmentChanges';
 import InactiveStudents from './pages/InactiveStudents';
 import Broadcast from './pages/Broadcast';
+import StaffAttendanceManagement from './pages/StaffAttendanceManagement';
 
 // คอมโพเนนต์สำหรับตรวจบัตรผ่าน (Protected Route)
 const ProtectedRoute = ({ children }: { children: JSX.Element }) => {
@@ -86,6 +87,7 @@ function App() {
           <Route path="inactive-students" element={<InactiveStudents />} />
           <Route path="photography" element={<PhotographyPage />} />
           <Route path="broadcast" element={<Broadcast />} />
+          <Route path="staff-attendance" element={<StaffAttendanceManagement />} />
         </Route>
       </Routes>
     </BrowserRouter>
